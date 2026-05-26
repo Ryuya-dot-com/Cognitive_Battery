@@ -1,1 +1,297 @@
-# Cognitive_Battery
+# Cognitive Battery
+
+日本語を母語とする成人を対象に、Web 上で実施する認知機能テストバッテリーです。  
+GitHub Pages での公開を想定しており、参加者は自宅から PC で実施します。
+
+このアプリは、`Flanker`、`DCCS`、`List Sorting`、`Pattern Comparison`、`Picture Sequence` に着想を得ていますが、**NIH Toolbox の厳密再現ではありません**。  
+位置づけとしては、先行研究を参考にした **独自 Web 版バッテリー** です。
+
+## 想定用途
+
+- 日本語話者の成人参加者に対する遠隔実施
+- サンプル内での相対比較
+- 受験者提出用の Excel 1 ファイル保存
+- GitHub Pages での静的配信
+
+## 特徴
+
+- 5つの課題を 1 つの画面で連続実施
+- 参加前の説明と同意確認（Informed consent チェック、`CONSENT_VERSION` 追跡）
+- 開始前の環境チェックと 8 段階グレースケール確認
+- 刺激のプリロードとセッション開始時のウォームアップ
+- `requestAnimationFrame` 同期 + `KeyboardEvent.timeStamp` による反応時間計測
+- `PerformanceObserver('longtask')` でテスト中のフレーム逸脱を自動記録
+- 試行順を再現可能にする seedable PRNG（mulberry32）
+- 参加者 ID を FNV-1a ハッシュし 5×5 Latin square でカウンターバランス
+- セッションの自動保存と復元（乱数状態・セッション番号を含む）
+- 同一参加者 ID のセッション番号を自動採番（リテスト対応）
+- フルスクリーン試行
+- タブ離脱、フォーカス離脱、画面サイズ変更などの品質ログ取得
+- プロトコル・課題・採点・刺激プールの版数を出力に固定記録
+- 研究者レビュー用の品質フラグ（低正答率、極端 RT、環境警告、フォーカス離脱など）を自動集計
+- Quality Control を Multiverse Analysis として扱う `QC Multiverse` 出力
+- 課題ごとのスコア、研究用メトリクス（IES、d′、congruency effect、switch cost、inattention flag 等）、試行別データを Excel に集約
+- 研究者向け詳細として JSON 出力も可能（通常の受験者提出は Excel のみ）
+- 出力ファイルに同梱された Codebook シートで列の意味・単位を明示
+- Playwright による自動テストスイート（39 テスト）
+- Python / R の解析テンプレートと提出Excel検証ツール（ex-Gaussian フィット対応）
+
+## 含まれる課題
+
+1. フランカー課題（抑制制御・注意）
+2. カード分類課題（認知的柔軟性）
+3. リストソート課題（ワーキングメモリ）
+4. パターン比較課題（処理速度）
+5. 系列記憶課題（エピソード記憶）
+
+## 実施環境
+
+推奨:
+
+- Windows / macOS の PC
+- キーボードあり
+- Chrome または Edge の最新版
+
+非推奨:
+
+- スマートフォン
+- タブレット
+- タッチ操作のみの環境
+
+テスト中にブラウザバックや再読み込みを行うと、警告が表示されます。  
+セッション情報は `localStorage` に保存され、ページ再読込後に復元できます。ただし、**進行中の課題は最初から再開** されます（ここで再度乱数状態が正しく復元されます）。
+
+## 参加者情報とプライバシー
+
+- 参加者ID と 年齢 のみ必須です
+- 氏名は任意であり、空欄のまま進められます（研究利用時は ID のみでの識別を推奨）
+- 画面までの距離 (cm) は任意入力で、視覚度換算の参考値として記録されます
+- 開始前に「実施の説明と同意」を読み、同意チェックを入れる必要があります
+- データはサーバに送信されず、参加者端末内の `localStorage` と、ダウンロードした Excel ファイルにのみ保持されます
+
+## データ保存
+
+サーバ保存は行いません。  
+結果は参加者の端末上で Excel ファイルとして保存されます。受験者が研究者へ提出するファイルは、この Excel 1 つだけです。
+
+### Excel 出力のシート構成
+
+- `Export Manifest` — 提出ファイルの版数、保存時刻、参加者 ID、セッション番号、含まれるシート一覧
+- `Participant` — 参加者メタデータ（ID・年齢・同意・視距離）、乱数シード、実施環境、外れ値閾値
+- `Scores` — 各課題の総合スコア、正答率、SAA の成分スコア、タイムアウト件数
+- `Research Metrics` — 課題別詳細指標（全試行を 1 行のワイド形式）
+- `Task Metrics Long` — 課題別メトリクスを「1 行 = 1 指標」の long 形式で記録
+- `Protocol Metadata` — アプリ、プロトコル、課題、採点、刺激プール、タイミング手続きの版数
+- `Researcher Review` — 品質フラグ、確認メモ、課題別スコア・刺激条件を 1 行で集約
+- `QC Multiverse` — 複数の QC universe と、その universe での含入候補 / 除外候補を長形式で記録
+- `Session Quality` — タブ離脱、フォーカス離脱、フルスクリーン解除等のセッション品質指標
+- `Session Events` — 品質イベントの時系列ログ
+- `Codebook` — 各シートの列名・単位・説明
+- `<test>_raw` — 試行レベルデータ（`trialNum`, `rt`, `tOnset`, `tResponse`, `correct`, など）
+
+### 研究者向け JSON 出力
+
+- 通常の受験者提出には使いません
+- 研究者向け詳細メニューから、必要な場合だけ JSON 1 ファイルを保存できます
+- R / Python での解析にも直接読み込めます
+- キーは Excel のシート名に対応（`participant`, `protocol`, `quality_flags`, `researcher_review`, `qc_multiverse`, `environment`, `research_metrics`, `task_metrics_long`, `trials`, `codebook` など）
+
+### 計算される主な研究用メトリクス
+
+- **Flanker**: 正答率（congruent / incongruent / overall）、平均・中央・SD 反応時間、`congruency_effect_ms`、IES（Inverse Efficiency Score）
+- **DCCS**: 正答率（dominant / non-dominant / overall）、反応時間各種、`switch_cost_ms`、IES
+- **Pattern Comparison**: hit rate, false alarm rate, d′, criterion c, mean RT, IES
+- **List Sorting**: 条件別（single / dual）正答率、正答最大スパン
+- **Picture Sequence**: 隣接ペア数、学習勾配、平均応答時間
+
+### 試行レベルデータのタイムスタンプ
+
+- `rt` — 刺激呈示フレーム（`requestAnimationFrame` 同期）から応答までの `performance.now()` 差（ms）
+- `tOnset` — セッション開始時点からの刺激呈示時刻（ms）
+- `tResponse` — セッション開始時点からの反応時刻（ms）
+
+### Session Quality
+
+以下のような実施ログを保存します。
+
+- タブ離脱回数
+- フォーカス離脱回数
+- フルスクリーン解除回数
+- 画面サイズ変更回数
+- タイムアウト数
+- 極端に速い反応数（既定 RT < 150ms）／ 遅い反応数（RT > 5000ms）
+- 研究者レビュー用フラグ（`review_recommendation`, `review_notes`, `*_flag`）
+
+これらは **分析時に確認するためのログ** です。  
+アプリ側で自動除外判定は行いません。`Researcher Review` シートは確認候補を見つけやすくするための監査ビューです。
+
+### Quality Control as Multiverse Analysis
+
+除外判断は単一の固定ルールではなく、研究者自由度のひとつとして扱います。出力には `QC Multiverse` が含まれ、各参加者について以下の universe を長形式で記録します。
+
+- `qc_u00_all_sessions` — QC による除外候補化を行わず、全セッションを含める記述的 universe
+- `qc_u01_protocol_deviation_only` — 実施不能環境など明確なプロトコル逸脱のみを候補化
+- `qc_u02_behavioral_lenient` — 明確な不注意・反応異常のみを候補化する緩い behavioral QC
+- `qc_u03_behavioral_standard` — 低正答率、極端 RT、タイムアウト、練習反復を標準閾値で候補化
+- `qc_u04_full_strict` — 行動指標と実施環境を厳格に扱う保守的 universe
+
+各行の `include_candidate` / `exclude_candidate` は **感度分析用の符号化** であり、自動除外ではありません。主要解析、緩い QC、厳格 QC の結果を並べ、QC 判断に対する結論の頑健性を確認してください。
+
+解析テンプレートは、通常の参加者レベル `summary.csv` と `QC Multiverse` 長形式CSVに加えて、参加者行を QC universe ごとに展開した `<summary名>_by_qc_universe.csv` も出力します。主要解析と複数 universe の感度分析を同じ表構造で比較できます。
+
+## 再現可能性（Reproducibility）
+
+試行順は seedable PRNG（mulberry32）で生成され、シード値は `Participant` シートの `random_seed` 列に記録されます。同じシードを与えれば同じ試行順を再現できます。アプリ版数、プロトコル版数、課題版数、採点版数、刺激プール版数は `Protocol Metadata` と JSON の `protocol` に記録されます。
+
+## ディレクトリ構成
+
+```text
+Cognitive_Battery/
+├─ index.html
+├─ README.md
+├─ css/
+│  └─ style.css
+├─ js/
+│  ├─ main.js            # 画面遷移、PRNG、RAF 同期、プリロード、Excel 出力
+│  ├─ flanker.js
+│  ├─ dccs.js
+│  ├─ list-sorting.js
+│  ├─ pattern-comparison.js
+│  └─ picture-sequence.js
+├─ analysis/
+│  ├─ analyze.py
+│  ├─ analyze.R
+│  ├─ validate_exports.py
+│  └─ build_dataset.py
+├─ tests/
+│  └─ *.spec.js
+├─ vendor/
+│  └─ xlsx.full.min.js
+├─ package.json
+├─ package-lock.json
+└─ playwright.config.js
+```
+
+ローカルの文献PDF、提出Excel、解析出力CSV、Playwrightレポート、個人のエディタ設定は `.gitignore` で公開対象から除外しています。
+
+## ローカルでの確認
+
+ビルドは不要です。  
+そのまま `index.html` をブラウザで開くか、簡易ローカルサーバで確認できます。
+
+例:
+
+```powershell
+python -m http.server 8000
+```
+
+その後、ブラウザで以下を開きます。
+
+```text
+http://localhost:8000/
+```
+
+## GitHub Pages での公開
+
+1. このディレクトリを GitHub リポジトリに配置する
+2. GitHub の `Settings > Pages` を開く
+3. 公開元の Branch を選ぶ
+4. ルートディレクトリを公開対象にする
+
+このアプリは静的ファイルだけで動作します。  
+追加のバックエンドは不要です。
+
+## 運用上の注意
+
+- 参加者には事前に「PC とキーボードで実施する」ことを案内してください
+- 遠隔実施では完全な行動統制はできないため、品質ログと視距離入力を前提に分析してください
+- Excel ファイル名には参加者 ID が使われますが、保存時に安全な文字へ自動変換されます
+- 厳密な標準化得点ではなく、サンプル内比較を前提に運用してください
+- 研究利用時は、`random_seed` と `Participant` シートの閾値を記録した上で解析してください
+- 氏名は任意欄です。研究デザイン上の必要がなければ空欄での進行を推奨します
+
+### 研究者側の解析前チェック
+
+参加者から集めた Excel ファイルは、解析前に検証してください。
+
+```bash
+python analysis/validate_exports.py /path/to/exports validation_report.csv
+python analysis/build_dataset.py /path/to/exports dataset --validation-report validation_report.csv
+```
+
+`validation_report.csv` は、必須シート、`Export Manifest`、版数、参加者 ID、セッション番号、raw データ、QC universe 数、重複セッションを一覧化します。`status = error` のファイルは `build_dataset.py` で既定除外されます。除外せず確認用に出力したい場合だけ `--include-invalid` を付けてください。
+
+`dataset/` には `participants.csv`、`task_metrics_long.csv`、`trials_long.csv`、`qc_multiverse.csv`、`session_events.csv`、`dataset_manifest.csv` が出力されます。解析前に `dataset_manifest.csv` で処理件数と除外件数を確認し、`status = warning` のファイルを含める場合は理由を記録してください。
+
+## カウンターバランス
+
+全 5 課題を実施する場合、実施順は参加者 ID の FNV-1a ハッシュから 5×5 Latin square の行を決定します。これにより、参加者ごとに以下の性質が保証されます。
+
+- **決定論性**: 同じ ID は常に同じ順序に割り当てられる
+- **均衡**: 500 人以上のサンプルで、5 つの順序グループに 20% 前後で分散
+- **Latin 条件**: 各課題が各位置（1 番目〜5 番目）に等頻度で現れる
+
+順序は `counterbalance_group`（0–4）と `counterbalance_order`（カンマ区切り）として `Participant` シートおよび JSON に記録されます。一部のテストのみを選択した場合、カウンターバランスは適用されません。
+
+## 刺激プール
+
+- **Picture Sequence**: 4 テーマ（朝の準備・料理を作る・旅行の準備・オフィスの一日）からランダムに 1 つ選択。選ばれたテーマは `theme` として試行データに記録
+- **List Sorting Single 条件**: 3 ドメイン（動物・食べ物・乗り物）からランダム選択。選ばれたドメインは `category` に記録
+- **List Sorting Dual 条件**: 動物 + 食べ物の組み合わせに固定（NIH 準拠）
+- **DCCS**: 3 つの bivalent カードセット（青星/赤丸、緑三角/黄四角、紫星/橙三角）からセッション単位でランダム選択。`setId` が試行データに記録される
+
+## キーボード完結操作
+
+マウスなしでも完走できる設計になっています。
+
+- **Flanker / DCCS / Pattern Comparison**: F / J キーで応答
+- **List Sorting**: Tab で項目間を移動、Enter / Space で選択、Backspace で直前の選択を取り消し
+- **Picture Sequence**: Tab で移動、Enter / Space でアイテムを選択 → 空きスロットで再度 Enter で配置、スロット上で Backspace / Delete で取り消し
+
+各入力可能要素は `role="button"`・`tabindex="0"`・`aria-label` を持ち、キー操作時には `focus-visible` アウトラインが表示されます。
+
+## プライバシーモード
+
+共有 PC での実施時に使えるオプションです。同意画面のチェックボックス「この端末に進行状況を保存しない」をオンにすると、
+
+- `localStorage` へのセッション保存を一切行いません
+- 途中復元はできなくなりますが、前の参加者データが端末に残る心配もありません
+- 設定は `Participant` シートの `privacy_mode` 列（1/0）に記録されます
+
+## 自動テスト
+
+```bash
+npm install                   # 初回のみ
+npx playwright install chromium  # 初回のみ
+npm test                      # 39 テストを実行
+npm run test:ui               # Playwright UI モードで対話的に実行
+```
+
+GitHub Actions（`.github/workflows/test.yml`）が push / PR ごとに全テストを自動実行します。
+
+テストは以下をカバーします。
+
+- PRNG 決定論性 / 順序カウンターバランスの安定性
+- Consent ゲート / フォームバリデーション / 任意フィールド
+- `requestAnimationFrame` 同期 / `event.timeStamp` / SHA-256
+- セッション番号の永続化 / リロード耐性
+- `results.flanker.score` などのフルフロー
+- JSON `integrity_sha256` の往復検証
+- IES、switch cost、d′、inattention flag の計算
+
+## 解析テンプレート
+
+`analysis/` ディレクトリに Python と R のスクリプトを同梱しています。
+
+- `analyze.py`: 標準ライブラリ。scipy が利用可能なら ex-Gaussian（μ, σ, τ）も算出
+- `analyze.R`: jsonlite + digest + dplyr 依存
+- `analysis/README.md` に詳細あり
+
+## 今後の改善候補
+
+- 大きくなった JavaScript の段階的なモジュール分割と TypeScript 移行
+- スクリーンリーダーでの実機動作確認と修正
+- localStorage の opt-in 暗号化（passphrase ベース）
+- i18n（英語・中国語）対応
+- アダプティブ手続き（staircase）を Pattern Comparison に
+- ディスプレイ較正（gamma / luminance）のガイド追加
