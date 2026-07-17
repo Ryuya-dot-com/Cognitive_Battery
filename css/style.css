@@ -1137,10 +1137,109 @@ h1 {
     color: #0f172a;
 }
 
+.saved-session.saved-session-incompatible {
+    border-color: #f59e0b;
+    background: #fffbeb;
+}
+
+.saved-session.saved-session-incompatible .saved-session-copy strong {
+    color: #92400e;
+}
+
 .saved-session-actions {
     display: flex;
     gap: 10px;
     flex-wrap: wrap;
+}
+
+.confirmation-dialog {
+    width: min(92vw, 520px);
+    padding: 0;
+    border: 0;
+    border-radius: 16px;
+    box-shadow: 0 24px 70px rgba(15, 23, 42, 0.3);
+    color: #0f172a;
+}
+
+.confirmation-dialog::backdrop {
+    background: rgba(15, 23, 42, 0.58);
+}
+
+.confirmation-dialog form {
+    display: grid;
+    gap: 16px;
+    padding: 24px;
+}
+
+.confirmation-dialog h2,
+.confirmation-dialog p {
+    margin: 0;
+}
+
+.confirmation-dialog p {
+    color: #475569;
+    line-height: 1.65;
+}
+
+.confirmation-dialog-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.instructions h2[tabindex="-1"]:focus {
+    outline: 3px solid #2563eb;
+    outline-offset: 4px;
+}
+
+#results-heading:focus,
+#session-ownership-lost-heading:focus {
+    outline: 3px solid #2563eb;
+    outline-offset: 6px;
+}
+
+body.session-storage-blocked {
+    overflow: hidden;
+}
+
+.session-blocking-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 10000;
+    display: grid;
+    place-items: center;
+    padding: 24px;
+    background: rgba(15, 23, 42, 0.82);
+}
+
+.session-blocking-overlay[hidden] {
+    display: none;
+}
+
+.session-blocking-card {
+    width: min(620px, 100%);
+    padding: 28px;
+    border: 3px solid #b91c1c;
+    border-radius: 14px;
+    background: #fff;
+    color: #172033;
+    box-shadow: 0 24px 70px rgba(0, 0, 0, 0.35);
+}
+
+.session-blocking-card h2 {
+    margin: 0 0 14px;
+    color: #991b1b;
+}
+
+.session-blocking-card p {
+    margin: 0 0 14px;
+    line-height: 1.65;
+}
+
+.session-blocking-card p:last-child {
+    margin-bottom: 0;
+    font-weight: 700;
 }
 
 .panel-title {
@@ -1428,6 +1527,35 @@ h1 {
     box-shadow: 0 2px 10px rgba(15, 23, 42, 0.05);
 }
 
+.participant-link-card {
+    border-color: #93c5fd;
+    background: linear-gradient(145deg, #eff6ff 0%, #ffffff 62%);
+    box-shadow: 0 4px 16px rgba(37, 99, 235, 0.09);
+}
+
+.participant-link-description {
+    margin: -0.15em 0 1em;
+    color: #334155;
+    line-height: 1.6;
+}
+
+.participant-link-field {
+    margin-bottom: 0;
+}
+
+.participant-link-field input {
+    width: 100%;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.78rem;
+}
+
+.participant-link-field input[readonly] {
+    border-color: #bfdbfe;
+    background: #fff;
+    color: #1e3a8a;
+    cursor: text;
+}
+
 .study-config-sidebar {
     position: sticky;
     top: 18px;
@@ -1629,6 +1757,17 @@ h1 {
 .config-inline-actions .btn {
     padding: 10px 16px;
     font-size: 0.88rem;
+}
+
+.participant-link-actions {
+    align-items: center;
+}
+
+.btn.is-disabled,
+.btn[aria-disabled="true"] {
+    cursor: not-allowed;
+    opacity: 0.48;
+    pointer-events: none;
 }
 
 .researcher-config-actions {

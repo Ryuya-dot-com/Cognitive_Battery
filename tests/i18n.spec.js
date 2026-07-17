@@ -113,7 +113,7 @@ test('a restored session owns and locks its saved language', async ({ page }) =>
         App.inProgressTestId = 'flanker';
         App.quality = App.createQualityState();
         App.quality.environment = App.collectEnvironmentSnapshot();
-        App.persistSession();
+        await App.persistSession({ claim: true, expectedRaw: null });
 
         // Simulate the fresh in-memory state after a reload while retaining
         // the legacy-v2 payload that restoreSavedSession() should recover.

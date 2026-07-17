@@ -29,7 +29,7 @@ test('DCCS: exactly 3 bivalent card sets, each self-consistent', async ({ page }
 });
 
 test('DCCS: run() picks exactly one set and assigns targets/test cards', async ({ page }) => {
-    const result = await page.evaluate(() => {
+    const result = await page.evaluate(async () => {
         App.seedRandom(1);
         DCCSTest.run();
         const setId1 = DCCSTest.activeSetId;
@@ -81,12 +81,12 @@ test('List Sorting: 3 domains each with 6 items sorted ascending by size', async
 });
 
 test('privacy mode: persistSession does not write to localStorage', async ({ page }) => {
-    const result = await page.evaluate(() => {
+    const result = await page.evaluate(async () => {
         localStorage.removeItem(App.STORAGE_KEY);
         App.privacyMode = true;
         App.startTime = new Date();
         App.participantId = 'PRIV01';
-        App.persistSession();
+        await App.persistSession({ claim: true, expectedRaw: null });
         const stored = localStorage.getItem(App.STORAGE_KEY);
         return { stored };
     });
@@ -94,7 +94,7 @@ test('privacy mode: persistSession does not write to localStorage', async ({ pag
 });
 
 test('privacy mode OFF: persistSession writes to localStorage', async ({ page }) => {
-    const result = await page.evaluate(() => {
+    const result = await page.evaluate(async () => {
         localStorage.removeItem(App.STORAGE_KEY);
         App.privacyMode = false;
         App.startTime = new Date();
@@ -103,7 +103,7 @@ test('privacy mode OFF: persistSession writes to localStorage', async ({ page })
         App.selectedTests = ['flanker'];
         App.results = {};
         App.trialData = {};
-        App.persistSession();
+        await App.persistSession({ claim: true, expectedRaw: null });
         const stored = localStorage.getItem(App.STORAGE_KEY);
         return { stored: stored ? JSON.parse(stored) : null };
     });
