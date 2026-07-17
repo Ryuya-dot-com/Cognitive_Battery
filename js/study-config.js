@@ -49,6 +49,8 @@
         draft: null,
         researcherMode: false,
         fixedDraftState: null,
+        generatedParticipantLink: '',
+        participantLinkRevision: 0,
         linkedConfigInvalid: false,
         storedConfigInvalid: false,
 
@@ -98,6 +100,7 @@
         installAppApi() {
             this.app.openResearcherConfig = () => this.openResearcherConfig();
             this.app.buildStudyConfig = () => this.buildStudyConfig();
+            this.app.buildParticipantLink = config => this.buildParticipantLink(config);
             this.app.applyStudyConfig = config => this.applyStudyConfig(config);
             this.app.clearStudyConfig = () => this.clearStudyConfig();
             this.app.getEffectiveStudyConfigMetadata = () => this.getMetadata();
@@ -124,7 +127,7 @@
             return {
                 schema_version: SCHEMA_VERSION,
                 study_id: 'cognitive-battery-study',
-                participant_language: this.app ? this.app.uiLanguage : 'ja',
+                participant_language: 'en',
                 language_policy: 'fixed',
                 task_selection_policy: 'researcher_fixed',
                 selected_tests: this.app ? this.app.ALL_TEST_IDS.slice() : [],
@@ -301,6 +304,7 @@
                     this.draft.selected_tests = this.fixedDraftState.selected_tests.slice();
                     this.draft.fixed_order = this.fixedDraftState.fixed_order.slice();
                 }
+                this.invalidateParticipantLink();
                 this.renderTaskOrder();
                 this.renderProtocolSummary();
                 this.setError('');
@@ -312,6 +316,7 @@
                 const eventName = element.tagName === 'INPUT' && element.type === 'text' ? 'input' : 'change';
                 element.addEventListener(eventName, () => {
                     this.syncDraftFromControls();
+                    this.invalidateParticipantLink();
                     this.renderProtocolSummary();
                     this.setError('');
                 });
@@ -346,7 +351,11 @@
             document.getElementById('btn-load-study-preset').addEventListener('click', () => this.loadPreset());
             document.getElementById('btn-delete-study-preset').addEventListener('click', () => this.deletePreset({ confirmDelete: true }));
             document.getElementById('study-preset-select').addEventListener('change', () => this.updatePresetActionAvailability());
+            document.getElementById('btn-generate-participant-link').addEventListener('click', () => this.generateParticipantLink());
             document.getElementById('btn-copy-participant-link').addEventListener('click', () => this.copyParticipantLink());
+            document.getElementById('participant-link-preview').addEventListener('click', (event) => {
+                if (!this.generatedParticipantLink) event.preventDefault();
+            });
             document.querySelectorAll('.researcher-ui-language-option').forEach(button => {
                 button.addEventListener('click', () => {
                     const locale = button.dataset.locale === 'en' ? 'en' : 'ja';
@@ -376,6 +385,7 @@
 
         populateControls() {
             const draft = this.draft || this.defaultDraft();
+            this.invalidateParticipantLink();
             if (draft.order_policy === 'fixed') {
                 this.fixedDraftState = {
                     selected_tests: draft.selected_tests.slice(),
@@ -427,6 +437,7 @@
             this.removeQueryParameter('lang');
             this.removeQueryParameter('researcher_lang');
             this.applyActiveConfigurationToParticipantUi();
+            this.app.renderSavedSessionBanner();
             return finalized;
         },
 
@@ -452,6 +463,7 @@
             this.setParticipantTaskControls(null, { reset: true });
             this.renderActiveSummary();
             this.renderParticipantLanguageHint();
+            this.invalidateParticipantLink();
             this.removeQueryParameter('study');
             this.removeQueryParameter('mode');
             this.removeQueryParameter('researcher_lang');
@@ -459,6 +471,7 @@
             this.setError('');
             this.setStatus(this.app.t('common.researcherConfig.cleared'));
             this.app.showScreen('screen-start');
+            this.app.renderSavedSessionBanner();
             return true;
         },
 
@@ -619,6 +632,7 @@
                     if (event.target.checked) selected.add(taskId);
                     else selected.delete(taskId);
                     this.draft.selected_tests = baseOrder.filter(id => selected.has(id));
+                    this.invalidateParticipantLink();
                     this.renderTaskOrder();
                     this.renderProtocolSummary();
                     this.setError('');
@@ -642,6 +656,7 @@
             [order[index], order[swapIndex]] = [order[swapIndex], order[index]];
             this.draft.fixed_order = order;
             this.draft.selected_tests = order.filter(id => this.draft.selected_tests.includes(id));
+            this.invalidateParticipantLink();
             this.renderTaskOrder();
             this.renderProtocolSummary();
             this.focusTaskControl(taskId, direction < 0 ? '.task-move-up' : '.task-move-down');
@@ -773,14 +788,79 @@
             document.getElementById('btn-delete-study-preset').disabled = !hasSelection;
         },
 
-        async copyParticipantLink() {
+        invalidateParticipantLink() {
+            this.participantLinkRevision += 1;
+            const hadGeneratedLink = Boolean(this.generatedParticipantLink);
+            this.generatedParticipantLink = '';
+            const output = document.getElementById('participant-link-output');
+            if (output) output.value = '';
+            const copyButton = document.getElementById('btn-copy-participant-link');
+            if (copyButton) copyButton.disabled = true;
+            const preview = document.getElementById('participant-link-preview');
+            if (preview) {
+                preview.removeAttribute('href');
+                preview.classList.add('is-disabled');
+                preview.setAttribute('aria-disabled', 'true');
+                preview.tabIndex = -1;
+            }
+            if (hadGeneratedLink) this.setStatus('');
+        },
+
+        setGeneratedParticipantLink(text) {
+            this.generatedParticipantLink = String(text || '');
+            const output = document.getElementById('participant-link-output');
+            if (output) {
+                output.value = this.generatedParticipantLink;
+                output.scrollLeft = 0;
+            }
+            const copyButton = document.getElementById('btn-copy-participant-link');
+            if (copyButton) copyButton.disabled = !this.generatedParticipantLink;
+            const preview = document.getElementById('participant-link-preview');
+            if (preview) {
+                if (this.generatedParticipantLink) preview.setAttribute('href', this.generatedParticipantLink);
+                else preview.removeAttribute('href');
+                preview.classList.toggle('is-disabled', !this.generatedParticipantLink);
+                preview.setAttribute('aria-disabled', this.generatedParticipantLink ? 'false' : 'true');
+                preview.tabIndex = this.generatedParticipantLink ? 0 : -1;
+            }
+        },
+
+        async buildParticipantLink(input = null) {
+            const finalized = await this.finalizeConfig(input || this.buildStudyConfig());
+            const url = new URL(global.location.href);
+            url.search = '';
+            url.hash = '';
+            url.searchParams.set('study', encodeBase64Url(JSON.stringify(finalized)));
+            return url.toString();
+        },
+
+        async generateParticipantLink() {
+            const revision = this.participantLinkRevision;
             try {
-                const finalized = await this.finalizeConfig(this.buildStudyConfig());
-                const url = new URL(global.location.href);
-                url.searchParams.delete('mode');
-                url.searchParams.delete('lang');
-                url.searchParams.set('study', encodeBase64Url(JSON.stringify(finalized)));
-                const text = url.toString();
+                const text = await this.buildParticipantLink();
+                if (revision !== this.participantLinkRevision) return null;
+                this.setGeneratedParticipantLink(text);
+                this.setError('');
+                this.setStatus(this.app.t('common.researcherConfig.link.generated'));
+                return text;
+            } catch (error) {
+                if (revision !== this.participantLinkRevision) return null;
+                this.invalidateParticipantLink();
+                if (['study_id', 'no_tasks', 'williams_all', 'hash_unavailable'].includes(error.message)) {
+                    this.handleValidationError(error);
+                } else {
+                    this.setError(this.app.t('common.researcherConfig.link.generateFailed'));
+                }
+                return null;
+            }
+        },
+
+        async copyParticipantLink() {
+            const revision = this.participantLinkRevision;
+            try {
+                const text = await this.buildParticipantLink();
+                if (revision !== this.participantLinkRevision) return null;
+                this.setGeneratedParticipantLink(text);
                 if (navigator.clipboard && navigator.clipboard.writeText) {
                     await navigator.clipboard.writeText(text);
                 } else {
@@ -795,14 +875,19 @@
                     document.body.removeChild(temporary);
                     if (!copied) throw new Error('clipboard');
                 }
+                if (revision !== this.participantLinkRevision) return null;
                 this.setError('');
                 this.setStatus(this.app.t('common.researcherConfig.link.copied'));
+                return text;
             } catch (error) {
+                if (revision !== this.participantLinkRevision) return null;
                 if (['study_id', 'no_tasks', 'williams_all', 'hash_unavailable'].includes(error.message)) {
+                    this.invalidateParticipantLink();
                     this.handleValidationError(error);
                 } else {
                     this.setError(this.app.t('common.researcherConfig.link.copyFailed'));
                 }
+                return null;
             }
         },
 
@@ -882,39 +967,109 @@
             return { order: config.fixed_order.slice(), group: null };
         },
 
-        async restoreSessionConfig(saved) {
+        savedSessionHashEntries(saved) {
+            return [
+                { field: 'studyConfigHash', value: saved?.studyConfigHash },
+                { field: 'studyConfig.config_hash', value: saved?.studyConfig?.config_hash },
+                { field: 'sessionProtocolMetadata.study_config_hash', value: saved?.sessionProtocolMetadata?.study_config_hash },
+                { field: 'quality.study_config_hash', value: saved?.quality?.study_config_hash },
+                { field: 'quality.protocol.study_config_hash', value: saved?.quality?.protocol?.study_config_hash },
+            ];
+        },
+
+        async verifySavedSession(saved, { expectedActiveHash = null, allowLegacy = false } = {}) {
+            const fail = (status, reason = status) => ({
+                status,
+                reason,
+                config: null,
+                resolvedOrder: [],
+                isVersionedSession: false,
+            });
+
+            if (!saved || typeof saved !== 'object' || Array.isArray(saved)) return fail('invalid');
+            if (!saved.startTime || Number.isNaN(Date.parse(saved.startTime))) return fail('invalid', 'start_time');
+
             const isVersionedSession = saved.sessionPayloadVersion === this.app.SESSION_PAYLOAD_VERSION;
-            if (saved.studyConfig && !isVersionedSession) throw new Error('integrity');
+            if (Number.isFinite(saved.sessionPayloadVersion)
+                && saved.sessionPayloadVersion > this.app.SESSION_PAYLOAD_VERSION) {
+                return fail('invalid', 'session_version');
+            }
+            if (saved.studyConfig && !isVersionedSession) return fail('invalid', 'session_version');
             if (isVersionedSession) {
+                if (saved.appVersion !== this.app.APP_VERSION
+                    || saved.protocolVersion !== this.app.PROTOCOL_VERSION) {
+                    return fail('invalid', 'session_version');
+                }
                 if (!saved.studyConfig
                     || !Array.isArray(saved.selectedTests)
                     || saved.selectedTests.length === 0
                     || !Array.isArray(saved.resolvedTaskOrder)
                     || saved.resolvedTaskOrder.length === 0) {
-                    throw new Error('integrity');
+                    return fail('invalid', 'session_shape');
                 }
             }
+
+            const savedLanguages = [
+                saved.ui_language || saved.quality?.ui_language,
+                saved.instruction_language || saved.quality?.instruction_language,
+                saved.stimulus_language || saved.quality?.stimulus_language,
+                saved.consent_language || saved.quality?.consent_language,
+            ];
+            if (isVersionedSession
+                && (savedLanguages.some(language => !['ja', 'en'].includes(language))
+                    || savedLanguages.some(language => language !== savedLanguages[0]))) {
+                return fail('invalid', 'session_language');
+            }
+
             let restored;
             if (saved.studyConfig) {
-                restored = await this.finalizeConfig(saved.studyConfig, {
-                    expectedHash: saved.studyConfigHash || saved.studyConfig.config_hash || null,
-                    requireHash: isVersionedSession,
-                });
+                const hashEntries = this.savedSessionHashEntries(saved);
+                if (hashEntries.some(entry => typeof entry.value !== 'string' || !entry.value.trim())) {
+                    return fail('missing_hash');
+                }
+                const hashes = hashEntries.map(entry => entry.value.trim());
+                if (hashes.some(hash => !/^sha256:[0-9a-f]{64}$/.test(hash))) {
+                    return fail('invalid', 'hash_format');
+                }
+                if (new Set(hashes).size !== 1) return fail('hash_conflict');
+
+                try {
+                    restored = await this.finalizeConfig(saved.studyConfig, {
+                        expectedHash: hashes[0],
+                        requireHash: true,
+                    });
+                } catch (error) {
+                    return fail('invalid', error?.message || 'integrity');
+                }
+                if (expectedActiveHash && restored.config_hash !== expectedActiveHash) {
+                    return fail('mismatch');
+                }
             } else {
-                restored = await this.finalizeConfig({
-                    schema_version: SCHEMA_VERSION,
-                    study_id: 'legacy-session',
-                    participant_language: saved.ui_language || saved.quality?.ui_language || 'ja',
-                    language_policy: 'fixed',
-                    task_selection_policy: 'researcher_fixed',
-                    selected_tests: saved.selectedTests || [],
-                    order_policy: Number.isFinite(saved.counterbalanceGroup) ? 'williams' : 'fixed',
-                    fixed_order: saved.selectedTests || [],
-                    protocol_preset: PROTOCOL_PRESET,
-                    protocol_version: this.app.PROTOCOL_VERSION,
-                    config_source: 'legacy-session-v2',
-                });
+                if (expectedActiveHash || !allowLegacy) return fail('missing_hash');
+                try {
+                    restored = await this.finalizeConfig({
+                        schema_version: SCHEMA_VERSION,
+                        study_id: 'legacy-session',
+                        participant_language: saved.ui_language || saved.quality?.ui_language || 'ja',
+                        language_policy: 'fixed',
+                        task_selection_policy: 'researcher_fixed',
+                        selected_tests: saved.selectedTests || [],
+                        order_policy: Number.isFinite(saved.counterbalanceGroup) ? 'williams' : 'fixed',
+                        fixed_order: saved.selectedTests || [],
+                        protocol_preset: PROTOCOL_PRESET,
+                        protocol_version: this.app.PROTOCOL_VERSION,
+                        config_source: 'legacy-session-v2',
+                    });
+                } catch (error) {
+                    return fail('invalid', error?.message || 'integrity');
+                }
             }
+
+            if (restored.language_policy === 'fixed'
+                && savedLanguages.some(language => language && language !== restored.participant_language)) {
+                return fail('invalid', 'session_language');
+            }
+
             const rawResolved = Array.isArray(saved.resolvedTaskOrder) && saved.resolvedTaskOrder.length > 0
                 ? saved.resolvedTaskOrder
                 : saved.selectedTests;
@@ -922,32 +1077,57 @@
             if (!Array.isArray(rawResolved)
                 || resolved.length !== rawResolved.length
                 || new Set(rawResolved).size !== rawResolved.length) {
-                throw new Error('integrity');
+                return fail('invalid', 'resolved_order');
             }
             if (Array.isArray(saved.selectedTests)
                 && saved.selectedTests.length > 0
                 && JSON.stringify(saved.selectedTests) !== JSON.stringify(resolved)) {
-                throw new Error('integrity');
+                return fail('invalid', 'selected_tests');
             }
             if (restored.order_policy === 'fixed') {
                 if (JSON.stringify(resolved) !== JSON.stringify(restored.fixed_order)
                     || (isVersionedSession
                         ? saved.counterbalanceGroup !== null
                         : Number.isFinite(saved.counterbalanceGroup))) {
-                    throw new Error('integrity');
+                    return fail('invalid', 'fixed_order');
                 }
             } else {
-                if (isVersionedSession && !String(saved.participantId || '').trim()) throw new Error('integrity');
+                if (isVersionedSession && !String(saved.participantId || '').trim()) {
+                    return fail('invalid', 'participant_id');
+                }
                 const allocation = this.app.counterbalanceOrderFor(saved.participantId || '');
                 if (JSON.stringify(resolved) !== JSON.stringify(allocation.order)
                     || saved.counterbalanceGroup !== allocation.group) {
-                    throw new Error('integrity');
+                    return fail('invalid', 'counterbalance');
                 }
             }
-            this.app.studyConfig = restored;
-            this.app.studyConfigHash = restored.config_hash;
-            this.app.resolvedTaskOrder = resolved;
-            return restored;
+
+            return {
+                status: saved.studyConfig ? 'compatible' : 'legacy',
+                reason: null,
+                config: restored,
+                resolvedOrder: resolved,
+                isVersionedSession,
+            };
+        },
+
+        commitVerifiedSessionConfig(verified) {
+            if (!verified
+                || !['compatible', 'legacy'].includes(verified.status)
+                || !verified.config
+                || !Array.isArray(verified.resolvedOrder)) {
+                throw new Error('integrity');
+            }
+            this.app.studyConfig = verified.config;
+            this.app.studyConfigHash = verified.config.config_hash;
+            this.app.resolvedTaskOrder = verified.resolvedOrder.slice();
+            return verified.config;
+        },
+
+        async restoreSessionConfig(saved, options = {}) {
+            const verified = await this.verifySavedSession(saved, options);
+            if (!['compatible', 'legacy'].includes(verified.status)) throw new Error(verified.status);
+            return this.commitVerifiedSessionConfig(verified);
         },
 
         getMetadata() {

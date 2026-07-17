@@ -202,6 +202,10 @@ const App = {
     privacyMode: false,
     sessionNumber: 1,
     counterbalanceGroup: null,
+    sessionInstanceId: null,
+    sessionWriterId: null,
+    sessionStorageLastRaw: null,
+    sessionStorageOwnershipLost: false,
     studyConfig: null,
     studyConfigHash: null,
     resolvedTaskOrder: [],
@@ -209,8 +213,10 @@ const App = {
     studyConfigError: '',
     studyConfigErrorKey: '',
     startTransitionInProgress: false,
+    savedSessionRenderRevision: 0,
     longTaskObserver: null,
     HISTORY_STORAGE_KEY: 'cognitive-battery-history-v2',
+    SESSION_STORAGE_LOCK_KEY: 'cognitive-battery-session-storage-lock-v1',
     CONSENT_VERSION: '1.3.0',
     CONSENT_VERSIONS: Object.freeze({ ja: '1.3.0-ja', en: '1.1.0-en' }),
     sessionConsentVersion: null,
@@ -267,7 +273,7 @@ const App = {
         this.bindQualityListeners();
         this.initLongTaskObserver();
         this.renderEnvironmentChecks();
-        this.renderSavedSessionBanner();
+        await this.renderSavedSessionBanner();
     },
 
     t(key, params = {}) {
@@ -370,6 +376,16 @@ const App = {
     },
 
     bindEvents() {
+        const blockAbandonedSessionInteraction = (event) => {
+            if (!this.sessionStorageOwnershipLost) return;
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            this.showSessionStorageOwnershipBlock();
+        };
+        window.addEventListener('keydown', blockAbandonedSessionInteraction, true);
+        window.addEventListener('click', blockAbandonedSessionInteraction, true);
+        window.addEventListener('submit', blockAbandonedSessionInteraction, true);
+
         document.getElementById('btn-start').addEventListener('click', () => this.start());
         document.getElementById('btn-download-excel').addEventListener('click', () => this.downloadExcel());
         const btnDownloadJson = document.getElementById('btn-download-json');
@@ -410,6 +426,20 @@ const App = {
 
         document.querySelectorAll('.readiness-checkbox').forEach(cb => {
             cb.addEventListener('change', () => this.clearStartError());
+        });
+
+        window.addEventListener('storage', (event) => {
+            if (event.key !== this.STORAGE_KEY) return;
+            if (!this.isSessionActive()) {
+                this.renderSavedSessionBanner();
+                return;
+            }
+            if (this.privacyMode) return;
+
+            const nextPayload = this.parseSavedSessionRaw(event.newValue);
+            if (!this.ownsSavedSessionPayload(nextPayload)) {
+                this.handleSessionStorageOwnershipLoss();
+            }
         });
     },
 
@@ -474,7 +504,6 @@ const App = {
 
         window.addEventListener('beforeunload', (event) => {
             if (!this.startTime) return;
-            this.persistSession();
             if (!this.isSessionActive()) return;
             event.preventDefault();
             event.returnValue = this.NAVIGATION_WARNING;
@@ -547,6 +576,7 @@ const App = {
             cookiesEnabled: navigator.cookieEnabled ? 1 : 0,
             localStorageAvailable: this.storageAvailable('localStorage') ? 1 : 0,
             sessionStorageAvailable: this.storageAvailable('sessionStorage') ? 1 : 0,
+            webLocksAvailable: navigator.locks?.request ? 1 : 0,
             pageVisibilityState: document.visibilityState || '',
         };
     },
@@ -567,6 +597,7 @@ const App = {
         const hasTouch = env.maxTouchPoints > 0;
         const browser = env.browser;
         const browserStatus = ['Chrome', 'Edge'].includes(browser) ? 'pass' : (['Firefox', 'Safari'].includes(browser) ? 'warn' : 'fail');
+        const safeSessionStorage = Boolean(env.localStorageAvailable && env.webLocksAvailable);
 
         return [
             {
@@ -601,8 +632,8 @@ const App = {
             },
             {
                 key: 'storage',
-                status: env.localStorageAvailable ? 'pass' : 'warn',
-                label: this.t(env.localStorageAvailable ? 'common.environment.storageYes' : 'common.environment.storageNo'),
+                status: safeSessionStorage ? 'pass' : 'warn',
+                label: this.t(safeSessionStorage ? 'common.environment.storageYes' : 'common.environment.storageNo'),
                 detail: this.t('common.environment.storageDetail'),
             },
         ];
@@ -680,23 +711,263 @@ const App = {
         }
     },
 
-    renderSavedSessionBanner() {
+    hideSavedSessionBanner(container) {
+        container.classList.add('hidden');
+        container.classList.remove('saved-session-incompatible');
+        container.removeAttribute('data-compatibility');
+        container.removeAttribute('aria-busy');
+        container.replaceChildren();
+    },
+
+    renderVerifyingSavedSessionBanner(container) {
+        container.replaceChildren();
+        const copy = document.createElement('div');
+        copy.className = 'saved-session-copy';
+        const heading = document.createElement('strong');
+        heading.textContent = this.t('common.saved.verifyingHeading');
+        const body = document.createElement('span');
+        body.textContent = this.t('common.saved.verifyingBody');
+        copy.append(heading, body);
+        container.append(copy);
+        container.dataset.compatibility = 'verifying';
+        container.classList.remove('saved-session-incompatible', 'hidden');
+        container.setAttribute('aria-busy', 'true');
+    },
+
+    renderIncompatibleSavedSessionBanner(container, expectedRaw = null) {
+        container.replaceChildren();
+
+        const copy = document.createElement('div');
+        copy.className = 'saved-session-copy';
+        const heading = document.createElement('strong');
+        heading.textContent = this.t('common.saved.mismatchHeading');
+        const body = document.createElement('span');
+        body.textContent = this.t('common.saved.mismatchBody');
+        copy.append(heading, body);
+
+        const actions = document.createElement('div');
+        actions.className = 'saved-session-actions';
+        const discardButton = document.createElement('button');
+        discardButton.type = 'button';
+        discardButton.className = 'btn btn-danger';
+        discardButton.id = 'btn-discard-session';
+        discardButton.textContent = this.t('common.saved.discard');
+        discardButton.addEventListener('click', () => this.discardSavedSession({ expectedRaw }));
+        actions.append(discardButton);
+
+        container.append(copy, actions);
+        container.dataset.compatibility = 'mismatch';
+        container.classList.add('saved-session-incompatible');
+        container.classList.remove('hidden');
+        container.removeAttribute('aria-busy');
+    },
+
+    renderUnsupportedSavedSessionBanner(container) {
+        container.replaceChildren();
+        const copy = document.createElement('div');
+        copy.className = 'saved-session-copy';
+        const heading = document.createElement('strong');
+        heading.textContent = this.t('common.saved.unsupportedHeading');
+        const body = document.createElement('span');
+        body.textContent = this.t('common.saved.unsupportedBody');
+        copy.append(heading, body);
+        container.append(copy);
+        container.dataset.compatibility = 'unsupported';
+        container.classList.add('saved-session-incompatible');
+        container.classList.remove('hidden');
+        container.removeAttribute('aria-busy');
+    },
+
+    inspectSavedSessionStorage() {
+        let raw;
+        try {
+            raw = localStorage.getItem(this.STORAGE_KEY);
+        } catch (error) {
+            return { status: 'unavailable', raw: null, saved: null, error };
+        }
+        if (raw === null) return { status: 'empty', raw: null, saved: null, error: null };
+
+        try {
+            const saved = JSON.parse(raw);
+            if (!saved || typeof saved !== 'object' || Array.isArray(saved)) throw new Error('invalid');
+            return { status: 'parsed', raw, saved, error: null };
+        } catch (error) {
+            return { status: 'invalid', raw, saved: null, error };
+        }
+    },
+
+    parseSavedSessionRaw(raw) {
+        if (typeof raw !== 'string') return null;
+        try {
+            const parsed = JSON.parse(raw);
+            return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
+        } catch (error) {
+            return null;
+        }
+    },
+
+    ownsSavedSessionPayload(saved) {
+        return Boolean(
+            saved
+            && this.sessionInstanceId
+            && this.sessionWriterId
+            && saved.sessionInstanceId === this.sessionInstanceId
+            && saved.sessionWriterId === this.sessionWriterId
+        );
+    },
+
+    handleSessionStorageOwnershipLoss() {
+        if (this.sessionStorageOwnershipLost) return;
+        this.sessionStorageOwnershipLost = true;
+        this.logQualityEvent('session_storage_ownership_lost');
+        const message = this.t('common.saved.ownershipLost');
+        this.announceSessionStatus(message);
+        this.updateTestStatus(message);
+        this.showSessionStorageOwnershipBlock();
+    },
+
+    showSessionStorageOwnershipBlock() {
+        const overlay = document.getElementById('session-ownership-lost-overlay');
+        if (!overlay) return;
+
+        this.clearPrimaryAdvanceBinding();
+        const app = document.getElementById('app');
+        if (app) {
+            app.inert = true;
+            app.setAttribute('aria-hidden', 'true');
+        }
+        overlay.hidden = false;
+        document.body.classList.add('session-storage-blocked');
+        requestAnimationFrame(() => document.getElementById('session-ownership-lost-heading')?.focus());
+    },
+
+    canContinueOwnedSession() {
+        if (!this.sessionStorageOwnershipLost
+            && this.startTime
+            && !this.privacyMode
+            && this.sessionInstanceId
+            && this.sessionWriterId) {
+            const currentStorage = this.inspectSavedSessionStorage();
+            if (!this.ownsSavedSessionPayload(currentStorage.saved)) {
+                this.handleSessionStorageOwnershipLoss();
+            }
+        }
+        if (!this.sessionStorageOwnershipLost) return true;
+        this.showSessionStorageOwnershipBlock();
+        return false;
+    },
+
+    generateSessionStorageToken(prefix) {
+        if (window.crypto?.randomUUID) return `${prefix}-${window.crypto.randomUUID()}`;
+        const random = Array.from({ length: 4 }, () => this.generateSeed().toString(16).padStart(8, '0')).join('');
+        return `${prefix}-${Date.now().toString(36)}-${random}`;
+    },
+
+    async withSessionStorageLock(callback) {
+        if (!navigator.locks?.request) throw new Error('web_locks_unavailable');
+        return navigator.locks.request(this.SESSION_STORAGE_LOCK_KEY, { mode: 'exclusive' }, callback);
+    },
+
+    async runOwnedSessionExport(callback) {
+        if (!this.canContinueOwnedSession()) return false;
+
+        // Privacy-mode sessions never claim persistent storage, so there is
+        // no cross-tab writer ownership to serialize. Persisted sessions use
+        // the same exclusive lock as claim/restore so the final ownership
+        // check and the download trigger form one atomic operation.
+        if (this.privacyMode) return callback();
+
+        try {
+            return await this.withSessionStorageLock(() => {
+                if (!this.canContinueOwnedSession()) return false;
+                return callback();
+            });
+        } catch (error) {
+            console.error('Session export lock failed.', error);
+            return false;
+        }
+    },
+
+    async claimSavedSessionStorage(storage, saved) {
+        return this.withSessionStorageLock(() => {
+            const current = this.inspectSavedSessionStorage();
+            if (current.status !== 'parsed' || current.raw !== storage.raw) return null;
+
+            const savedInstanceId = typeof saved.sessionInstanceId === 'string'
+                && saved.sessionInstanceId.length >= 8
+                && saved.sessionInstanceId.length <= 128
+                ? saved.sessionInstanceId
+                : null;
+            const sessionInstanceId = savedInstanceId || this.generateSessionStorageToken('session');
+            const sessionWriterId = this.generateSessionStorageToken('writer');
+            const claimedPayload = {
+                ...saved,
+                sessionInstanceId,
+                sessionWriterId,
+            };
+            const raw = JSON.stringify(claimedPayload);
+            try {
+                localStorage.setItem(this.STORAGE_KEY, raw);
+            } catch (error) {
+                return null;
+            }
+            return { sessionInstanceId, sessionWriterId, raw };
+        });
+    },
+
+    hasStoredSession() {
+        return ['parsed', 'invalid'].includes(this.inspectSavedSessionStorage().status);
+    },
+
+    async renderSavedSessionBanner() {
         const container = document.getElementById('saved-session');
         if (!container) return;
+        const revision = ++this.savedSessionRenderRevision;
 
         if (this.isSessionActive()) {
-            container.classList.add('hidden');
-            container.innerHTML = '';
+            this.hideSavedSessionBanner(container);
             return;
         }
 
-        const saved = this.getSavedSessionPayload();
-        if (!saved || !saved.startTime) {
-            container.classList.add('hidden');
-            container.innerHTML = '';
+        const storage = this.inspectSavedSessionStorage();
+        if (['empty', 'unavailable'].includes(storage.status)) {
+            this.hideSavedSessionBanner(container);
             return;
         }
 
+        if (storage.status !== 'parsed' || !storage.saved.startTime) {
+            if (navigator.locks?.request) this.renderIncompatibleSavedSessionBanner(container, storage.raw);
+            else this.renderUnsupportedSavedSessionBanner(container);
+            return;
+        }
+
+        // The neutral state contains no PII or destructive action. Saved
+        // details appear only after every restore precondition is verified.
+        this.renderVerifyingSavedSessionBanner(container);
+
+        const compatibility = await this.getSavedSessionCompatibility(storage.saved);
+        if (revision !== this.savedSessionRenderRevision || this.isSessionActive()) return;
+
+        const currentStorage = this.inspectSavedSessionStorage();
+        if (currentStorage.status !== 'parsed' || currentStorage.raw !== storage.raw) {
+            this.renderSavedSessionBanner();
+            return;
+        }
+
+        container.dataset.compatibility = compatibility.status;
+        container.classList.toggle('saved-session-incompatible', ['mismatch', 'unsupported'].includes(compatibility.status));
+        container.removeAttribute('aria-busy');
+
+        if (compatibility.status === 'unsupported') {
+            this.renderUnsupportedSavedSessionBanner(container);
+            return;
+        }
+        if (compatibility.status === 'mismatch') {
+            this.renderIncompatibleSavedSessionBanner(container, storage.raw);
+            return;
+        }
+
+        const saved = storage.saved;
         const currentTestName = saved.selectedTests && saved.currentTestIndex < saved.selectedTests.length
             ? (this.testRegistry[saved.selectedTests[saved.currentTestIndex]]
                 ? this.testRegistry[saved.selectedTests[saved.currentTestIndex]].name
@@ -704,37 +975,126 @@ const App = {
             : this.t('common.saved.complete');
         const startedAt = new Date(saved.startTime).toLocaleString(this.uiLanguage === 'ja' ? 'ja-JP' : 'en-US');
 
-        container.innerHTML = `
-            <div class="saved-session-copy">
-                <strong>${this.t('common.saved.found')}</strong>
-                <span>${saved.participantName || this.t('common.saved.unnamed')} / ${saved.participantId || this.t('common.saved.noId')} / ${startedAt}</span>
-                <span>${this.t('common.saved.resumePoint', { task: currentTestName })}</span>
-            </div>
-            <div class="saved-session-actions">
-                <button type="button" class="btn btn-secondary" id="btn-resume-session">${this.t('common.saved.resume')}</button>
-                <button type="button" class="btn btn-primary" id="btn-discard-session">${this.t('common.saved.discard')}</button>
-            </div>
-        `;
-        container.classList.remove('hidden');
+        container.replaceChildren();
+        const copy = document.createElement('div');
+        copy.className = 'saved-session-copy';
+        const heading = document.createElement('strong');
+        heading.textContent = this.t('common.saved.found');
+        const participant = document.createElement('span');
+        participant.id = 'saved-session-participant';
+        participant.textContent = `${saved.participantName || this.t('common.saved.unnamed')} / ${saved.participantId || this.t('common.saved.noId')} / ${startedAt}`;
+        const resumePoint = document.createElement('span');
+        resumePoint.textContent = this.t('common.saved.resumePoint', { task: currentTestName });
+        copy.append(heading, participant, resumePoint);
 
-        document.getElementById('btn-resume-session').addEventListener('click', () => this.restoreSavedSession());
-        document.getElementById('btn-discard-session').addEventListener('click', () => this.discardSavedSession());
+        const actions = document.createElement('div');
+        actions.className = 'saved-session-actions';
+        const resumeButton = document.createElement('button');
+        resumeButton.type = 'button';
+        resumeButton.className = 'btn btn-primary';
+        resumeButton.id = 'btn-resume-session';
+        resumeButton.textContent = this.t('common.saved.resume');
+        resumeButton.addEventListener('click', () => this.restoreSavedSession());
+        const discardButton = document.createElement('button');
+        discardButton.type = 'button';
+        discardButton.className = 'btn btn-danger';
+        discardButton.id = 'btn-discard-session';
+        discardButton.textContent = this.t('common.saved.discard');
+        discardButton.addEventListener('click', () => this.discardSavedSession({ expectedRaw: storage.raw }));
+        actions.append(resumeButton, discardButton);
+
+        container.append(copy, actions);
+        container.classList.remove('hidden');
     },
 
     getSavedSessionPayload() {
-        try {
-            const raw = localStorage.getItem(this.STORAGE_KEY);
-            return raw ? JSON.parse(raw) : null;
-        } catch (error) {
-            console.error('Failed to parse saved session.', error);
-            return null;
-        }
+        const storage = this.inspectSavedSessionStorage();
+        return storage.status === 'parsed' ? storage.saved : null;
     },
 
-    discardSavedSession() {
-        localStorage.removeItem(this.STORAGE_KEY);
+    async getSavedSessionCompatibility(saved = this.getSavedSessionPayload()) {
+        const activeHash = StudyConfig.activeConfig?.config_hash || null;
+        if (!navigator.locks?.request) {
+            return { status: 'unsupported', activeHash, verification: null };
+        }
+        const invalidStudyScope = !activeHash && Boolean(
+            this.studyConfigErrorKey
+            || this.studyConfigError
+            || StudyConfig.linkedConfigInvalid
+            || StudyConfig.storedConfigInvalid
+        );
+        if (!saved || invalidStudyScope) {
+            return { status: 'mismatch', activeHash, verification: null };
+        }
+
+        const verification = await StudyConfig.verifySavedSession(saved, {
+            expectedActiveHash: activeHash,
+            allowLegacy: !activeHash,
+        });
+        const verified = ['compatible', 'legacy'].includes(verification.status);
+        return {
+            status: verified ? (activeHash ? 'match' : 'unscoped') : 'mismatch',
+            activeHash,
+            verification,
+        };
+    },
+
+    announceSessionStatus(message) {
+        const status = document.getElementById('session-action-status');
+        if (status) status.textContent = message || '';
+    },
+
+    requestDiscardSessionConfirmation() {
+        const dialog = document.getElementById('discard-session-dialog');
+        if (!dialog || typeof dialog.showModal !== 'function') {
+            this.announceSessionStatus(this.t('common.saved.discardUnavailable'));
+            return Promise.resolve(false);
+        }
+        if (dialog.open) return Promise.resolve(false);
+
+        dialog.returnValue = 'cancel';
+        return new Promise((resolve) => {
+            dialog.addEventListener('close', () => resolve(dialog.returnValue === 'discard'), { once: true });
+            dialog.showModal();
+            requestAnimationFrame(() => document.getElementById('btn-cancel-discard-session')?.focus());
+        });
+    },
+
+    async discardSavedSession({ confirmDiscard = true, expectedRaw = null, focusAfterDiscard = true } = {}) {
+        if (confirmDiscard && !(await this.requestDiscardSessionConfirmation())) return false;
+
+        let removalStatus;
+        try {
+            removalStatus = await this.withSessionStorageLock(() => {
+                const currentStorage = this.inspectSavedSessionStorage();
+                if (expectedRaw !== null && currentStorage.raw !== expectedRaw) return 'changed';
+                try {
+                    localStorage.removeItem(this.STORAGE_KEY);
+                    return 'removed';
+                } catch (error) {
+                    return 'failed';
+                }
+            });
+        } catch (error) {
+            removalStatus = 'failed';
+        }
+
+        if (removalStatus === 'changed') {
+            this.announceSessionStatus(this.t('common.saved.discardChanged'));
+            this.renderSavedSessionBanner();
+            return false;
+        }
+        if (removalStatus !== 'removed') {
+            this.announceSessionStatus(this.t('common.saved.discardUnavailable'));
+            return false;
+        }
+
+        this.sessionStorageLastRaw = null;
         this.renderSavedSessionBanner();
         this.clearStartError();
+        this.announceSessionStatus(this.t('common.saved.discarded'));
+        if (focusAfterDiscard) requestAnimationFrame(() => document.getElementById('participant-id')?.focus());
+        return true;
     },
 
     async restoreSavedSession() {
@@ -754,8 +1114,13 @@ const App = {
     },
 
     async restoreSavedSessionInternal() {
-        const saved = this.getSavedSessionPayload();
-        if (!saved) return;
+        const storage = this.inspectSavedSessionStorage();
+        if (storage.status === 'empty' || storage.status === 'unavailable') return;
+        if (storage.status !== 'parsed') {
+            this.setStartError(this.t('common.saved.mismatchBody'));
+            return;
+        }
+        const saved = storage.saved;
 
         const isVersionedSession = saved.sessionPayloadVersion === this.SESSION_PAYLOAD_VERSION;
         if ((Number.isFinite(saved.sessionPayloadVersion) && saved.sessionPayloadVersion > this.SESSION_PAYLOAD_VERSION)
@@ -768,13 +1133,25 @@ const App = {
         }
 
         let restoredConfig;
+        let verifiedSession;
         try {
-            restoredConfig = await StudyConfig.restoreSessionConfig(saved);
-            const savedProtocolHash = saved.sessionProtocolMetadata?.study_config_hash;
-            if ((isVersionedSession && !savedProtocolHash)
-                || (savedProtocolHash && savedProtocolHash !== restoredConfig.config_hash)) {
-                throw new Error('integrity');
+            const activeHash = StudyConfig.activeConfig?.config_hash || null;
+            const invalidStudyScope = !activeHash && Boolean(
+                this.studyConfigErrorKey
+                || this.studyConfigError
+                || StudyConfig.linkedConfigInvalid
+                || StudyConfig.storedConfigInvalid
+            );
+            if (invalidStudyScope) throw new Error('study_scope');
+
+            verifiedSession = await StudyConfig.verifySavedSession(saved, {
+                expectedActiveHash: activeHash,
+                allowLegacy: !activeHash,
+            });
+            if (!['compatible', 'legacy'].includes(verifiedSession.status)) {
+                throw new Error(verifiedSession.status);
             }
+            restoredConfig = verifiedSession.config;
 
             const savedLanguages = [
                 saved.ui_language || saved.quality?.ui_language,
@@ -791,11 +1168,25 @@ const App = {
                 && savedLanguages.some(language => language && language !== restoredConfig.participant_language)) {
                 throw new Error('integrity');
             }
+
+            const currentStorage = this.inspectSavedSessionStorage();
+            if (currentStorage.status !== 'parsed' || currentStorage.raw !== storage.raw) {
+                throw new Error('storage_changed');
+            }
+
+            const ownership = await this.claimSavedSessionStorage(storage, saved);
+            if (!ownership) throw new Error('storage_changed');
+            this.sessionInstanceId = ownership.sessionInstanceId;
+            this.sessionWriterId = ownership.sessionWriterId;
+            this.sessionStorageLastRaw = ownership.raw;
+            this.sessionStorageOwnershipLost = false;
         } catch (configError) {
             console.error('Saved study configuration failed verification.', configError);
-            this.setStartError(this.t('common.researcherConfig.validation.integrity'));
+            this.setStartError(this.t('common.saved.mismatchBody'));
             return;
         }
+
+        StudyConfig.commitVerifiedSessionConfig(verifiedSession);
 
         // A stored in-progress session owns its instruction/consent language.
         // Query-string preferences apply only to a new session and must not
@@ -847,9 +1238,13 @@ const App = {
         this._sessionPerfStart = performance.now() - elapsedAtSave;
         this.sessionNumber = Number.isFinite(saved.sessionNumber) ? saved.sessionNumber : 1;
         this.counterbalanceGroup = Number.isFinite(saved.counterbalanceGroup) ? saved.counterbalanceGroup : null;
-        this.sessionProtocolMetadata = saved.sessionProtocolMetadata
-            || (saved.sessionPayloadVersion >= 3 ? saved.quality?.protocol : null)
-            || this.buildProtocolMetadata();
+        this.sessionProtocolMetadata = {
+            ...(saved.sessionProtocolMetadata
+                || (saved.sessionPayloadVersion >= 3 ? saved.quality?.protocol : null)
+                || this.buildProtocolMetadata()),
+            session_instance_id: this.sessionInstanceId,
+        };
+        this.quality.protocol = this.sessionProtocolMetadata;
 
         this.applyParticipantFormValues();
         this.syncTestSelectionUi();
@@ -857,17 +1252,17 @@ const App = {
             stage: this.sessionStage,
             testId: this.inProgressTestId,
         });
-        this.persistSession();
+        await this.persistSession();
         this.renderSavedSessionBanner();
 
         if (this.currentTestIndex >= this.selectedTests.length || this.sessionStage === 'results') {
-            this.showResults();
+            this.showResults({ focusHeading: true });
             return;
         }
 
         if (this.sessionStage === 'break') {
             this.showScreen('screen-test');
-            this.showBreak();
+            this.showBreak({ focusHeading: true });
             return;
         }
 
@@ -897,7 +1292,7 @@ const App = {
         this.showScreen('screen-test');
         content.innerHTML = `
             <div class="instructions">
-                <h2>${this.t('common.saved.restoredHeading')}</h2>
+                <h2 id="resume-session-heading" tabindex="-1">${this.t('common.saved.restoredHeading')}</h2>
                 <p>${this.t('common.saved.restored')}</p>
                 <p>${this.t('common.saved.currentTask', { task: testInfo ? testInfo.name : currentTest })}</p>
                 <p>${this.t('common.saved.restartTask')}</p>
@@ -909,6 +1304,7 @@ const App = {
             await this.requestFullscreenIfPossible();
             this.runCurrentTest();
         });
+        document.getElementById('resume-session-heading').focus();
     },
 
     async requestFullscreenIfPossible() {
@@ -923,7 +1319,7 @@ const App = {
                 message: error.message,
             });
         } finally {
-            this.persistSession();
+            await this.persistSession();
         }
     },
 
@@ -950,6 +1346,14 @@ const App = {
         this.setStartError('');
     },
 
+    savedSessionStartGuardMessage() {
+        const compatibility = document.getElementById('saved-session')?.dataset.compatibility || null;
+        if (compatibility === 'mismatch') return this.t('common.validation.savedSessionMismatch');
+        if (compatibility === 'unsupported') return this.t('common.validation.savedSessionUnsupported');
+        if (compatibility === 'verifying') return this.t('common.validation.savedSessionVerifying');
+        return this.t('common.validation.savedSessionPending');
+    },
+
     validateStartForm() {
         const participantId = document.getElementById('participant-id').value.trim();
         const age = parseInt(document.getElementById('participant-age').value, 10);
@@ -963,6 +1367,7 @@ const App = {
 
         if (this.studyConfigErrorKey) return this.t(this.studyConfigErrorKey);
         if (this.studyConfigError) return this.studyConfigError;
+        if (this.hasStoredSession()) return this.savedSessionStartGuardMessage();
         if (!consent) return this.t('common.validation.consent');
         if (!participantId) return this.t('common.validation.id');
         if (!age || age < 18 || age > 85) return this.t('common.validation.age');
@@ -1005,31 +1410,21 @@ const App = {
             return;
         }
 
-        this.uiLanguage = I18n.getLocale();
-        this.instructionLanguage = this.uiLanguage;
-        this.stimulusLanguage = this.uiLanguage;
-        this.consentLanguage = this.uiLanguage;
-        this.sessionConsentVersion = this.getConsentVersion(this.consentLanguage);
-
-        this.participantName = document.getElementById('participant-name').value.trim();
-        this.participantId = document.getElementById('participant-id').value.trim();
-        this.participantAge = parseInt(document.getElementById('participant-age').value, 10);
+        const sessionLanguage = I18n.getLocale();
+        const participantName = document.getElementById('participant-name').value.trim();
+        const participantId = document.getElementById('participant-id').value.trim();
+        const participantAge = parseInt(document.getElementById('participant-age').value, 10);
         const viewingInput = document.getElementById('participant-viewing-distance');
         const viewingRaw = viewingInput ? parseInt(viewingInput.value, 10) : NaN;
-        this.viewingDistanceCm = Number.isFinite(viewingRaw) ? viewingRaw : null;
+        const viewingDistanceCm = Number.isFinite(viewingRaw) ? viewingRaw : null;
         const consentEl = document.getElementById('consent-agree');
-        this.consentAccepted = consentEl ? consentEl.checked : false;
+        const consentAccepted = consentEl ? consentEl.checked : false;
         const privacyEl = document.getElementById('privacy-no-persist');
-        this.privacyMode = privacyEl ? privacyEl.checked : false;
-        if (this.privacyMode) {
-            try {
-                localStorage.removeItem(this.STORAGE_KEY);
-                localStorage.removeItem(this.HISTORY_STORAGE_KEY);
-            } catch (e) { /* ignore */ }
-        }
+        const privacyMode = privacyEl ? privacyEl.checked : false;
 
+        let studyConfig;
         try {
-            this.studyConfig = await StudyConfig.createSessionConfig();
+            studyConfig = await StudyConfig.createSessionConfig();
         } catch (configError) {
             const message = configError?.message === 'hash_unavailable'
                 ? this.t('common.researcherConfig.validation.hashUnavailable')
@@ -1037,59 +1432,118 @@ const App = {
             this.setStartError(message);
             return;
         }
-        this.studyConfigHash = this.studyConfig.config_hash;
-        const resolvedPlan = StudyConfig.resolveTaskOrder(this.studyConfig, this.participantId);
-        this.counterbalanceGroup = resolvedPlan.group;
-        this.selectedTests = resolvedPlan.order.slice();
-        this.resolvedTaskOrder = this.selectedTests.slice();
-        this.lockLanguage();
+        const resolvedPlan = StudyConfig.resolveTaskOrder(studyConfig, participantId);
 
-        this.currentTestIndex = 0;
-        this.results = {};
-        this.trialData = {};
-        this.startTime = new Date();
-        this._sessionPerfStart = performance.now();
-        this.seedRandom(this.generateSeed());
-        this.sessionStage = 'test';
-        this.inProgressTestId = this.selectedTests[0];
-        this.quality = this.createQualityState();
-        this.renderEnvironmentChecks();
-        this.quality.started_at = this.startTime.toISOString();
-        this.quality.random_seed = this.randomSeed;
-        this.quality.grayscale_confirmed = document.getElementById('readiness-grayscale')?.checked ? 1 : 0;
-        this.quality.outlier_thresholds = {
-            rt_too_fast_ms: 150,
-            rt_too_slow_ms: 5000,
-            rt_exclude_below_ms: 100,
-            saa_rt_clip_min_ms: 500,
-            saa_rt_clip_max_ms: 3000,
-            saa_rt_sd_multiplier: 3,
-            inattention_easy_acc_threshold: 0.85,
+        const initializeSession = () => {
+                if (this.hasStoredSession()) {
+                    this.setStartError(this.savedSessionStartGuardMessage());
+                    this.renderSavedSessionBanner();
+                    return false;
+                }
+
+                this.uiLanguage = sessionLanguage;
+                this.instructionLanguage = sessionLanguage;
+                this.stimulusLanguage = sessionLanguage;
+                this.consentLanguage = sessionLanguage;
+                this.sessionConsentVersion = this.getConsentVersion(sessionLanguage);
+                this.participantName = participantName;
+                this.participantId = participantId;
+                this.participantAge = participantAge;
+                this.viewingDistanceCm = viewingDistanceCm;
+                this.consentAccepted = consentAccepted;
+                this.privacyMode = privacyMode;
+                this.studyConfig = studyConfig;
+                this.studyConfigHash = studyConfig.config_hash;
+                this.counterbalanceGroup = resolvedPlan.group;
+                this.selectedTests = resolvedPlan.order.slice();
+                this.resolvedTaskOrder = this.selectedTests.slice();
+                this.sessionInstanceId = this.generateSessionStorageToken('session');
+                this.sessionWriterId = this.generateSessionStorageToken('writer');
+                this.sessionStorageLastRaw = null;
+                this.sessionStorageOwnershipLost = false;
+                this.lockLanguage();
+
+                this.currentTestIndex = 0;
+                this.results = {};
+                this.trialData = {};
+                this.startTime = new Date();
+                this._sessionPerfStart = performance.now();
+                this.seedRandom(this.generateSeed());
+                this.sessionStage = 'test';
+                this.inProgressTestId = this.selectedTests[0];
+                this.quality = this.createQualityState();
+                this.renderEnvironmentChecks();
+                this.quality.started_at = this.startTime.toISOString();
+                this.quality.random_seed = this.randomSeed;
+                this.quality.grayscale_confirmed = document.getElementById('readiness-grayscale')?.checked ? 1 : 0;
+                this.quality.outlier_thresholds = {
+                    rt_too_fast_ms: 150,
+                    rt_too_slow_ms: 5000,
+                    rt_exclude_below_ms: 100,
+                    saa_rt_clip_min_ms: 500,
+                    saa_rt_clip_max_ms: 3000,
+                    saa_rt_sd_multiplier: 3,
+                    inattention_easy_acc_threshold: 0.85,
+                };
+                this.sessionNumber = this.bumpSessionNumber(this.participantId);
+                this.quality.session_number = this.sessionNumber;
+                this.quality.counterbalance_group = this.counterbalanceGroup;
+                this.quality.counterbalance_order = this.selectedTests.join(',');
+                this.quality.consent_version = this.getActiveConsentVersion();
+                this.quality.ui_language = this.uiLanguage;
+                this.quality.instruction_language = this.instructionLanguage;
+                this.quality.stimulus_language = this.stimulusLanguage;
+                this.quality.consent_language = this.consentLanguage;
+                this.quality.translation_version = I18n.TRANSLATION_VERSION;
+                this.quality.privacy_mode = this.privacyMode ? 1 : 0;
+                Object.assign(this.quality, StudyConfig.getMetadata());
+                this.sessionProtocolMetadata = this.buildProtocolMetadata();
+                this.quality.protocol = this.sessionProtocolMetadata;
+                this.logQualityEvent('session_started', {
+                    selectedTests: this.selectedTests.join(','),
+                    randomSeed: this.randomSeed,
+                    uiLanguage: this.uiLanguage,
+                    translationVersion: I18n.TRANSLATION_VERSION,
+                    studyConfigId: this.studyConfig.config_id,
+                    studyConfigHash: this.studyConfigHash,
+                    sessionInstanceId: this.sessionInstanceId,
+                });
+
+                if (!this.persistSessionNow({ claim: true, expectedRaw: null })) {
+                    this.startTime = null;
+                    this._sessionPerfStart = null;
+                    this.sessionStage = 'idle';
+                    this.inProgressTestId = null;
+                    this.sessionInstanceId = null;
+                    this.sessionWriterId = null;
+                    this.sessionStorageLastRaw = null;
+                    this.unlockLanguage();
+                    this.setStartError(this.t('common.validation.storageUnavailable'));
+                    return false;
+                }
+                return true;
         };
-        this.sessionNumber = this.bumpSessionNumber(this.participantId);
-        this.quality.session_number = this.sessionNumber;
-        this.quality.counterbalance_group = this.counterbalanceGroup;
-        this.quality.counterbalance_order = this.selectedTests.join(',');
-        this.quality.consent_version = this.getActiveConsentVersion();
-        this.quality.ui_language = this.uiLanguage;
-        this.quality.instruction_language = this.instructionLanguage;
-        this.quality.stimulus_language = this.stimulusLanguage;
-        this.quality.consent_language = this.consentLanguage;
-        this.quality.translation_version = I18n.TRANSLATION_VERSION;
-        this.quality.privacy_mode = this.privacyMode ? 1 : 0;
-        Object.assign(this.quality, StudyConfig.getMetadata());
-        this.sessionProtocolMetadata = this.buildProtocolMetadata();
-        this.quality.protocol = this.sessionProtocolMetadata;
+
+        let initialized = false;
+        try {
+            // Privacy mode never writes session progress, so it does not need
+            // a cross-tab lock. Persisted sessions fail closed unless the
+            // browser provides the atomic Web Locks API.
+            initialized = privacyMode
+                ? initializeSession()
+                : await this.withSessionStorageLock(initializeSession);
+        } catch (storageError) {
+            console.error('Session storage lock failed.', storageError);
+            this.setStartError(this.t('common.validation.storageUnavailable'));
+            return;
+        }
+        if (!initialized) return;
+
+        if (this.privacyMode) {
+            try { localStorage.removeItem(this.HISTORY_STORAGE_KEY); } catch (e) { /* ignore */ }
+        }
         await this.captureDisplayTiming();
-        this.logQualityEvent('session_started', {
-            selectedTests: this.selectedTests.join(','),
-            randomSeed: this.randomSeed,
-            uiLanguage: this.uiLanguage,
-            translationVersion: I18n.TRANSLATION_VERSION,
-            studyConfigId: this.studyConfig.config_id,
-            studyConfigHash: this.studyConfigHash,
-        });
-        this.persistSession();
+        await this.persistSession();
 
         const content = this.getTestContent();
         this.showScreen('screen-test');
@@ -1107,9 +1561,10 @@ const App = {
     },
 
     runCurrentTest() {
+        if (!this.canContinueOwnedSession()) return false;
         if (this.currentTestIndex >= this.selectedTests.length) {
             this.showResults();
-            return;
+            return true;
         }
 
         const testId = this.selectedTests[this.currentTestIndex];
@@ -1124,7 +1579,7 @@ const App = {
 
         if (testInfo.module && typeof testInfo.module.run === 'function') {
             testInfo.module.run();
-            return;
+            return true;
         }
 
         const content = this.getTestContent();
@@ -1137,9 +1592,11 @@ const App = {
             </div>
         `;
         document.getElementById('btn-return-start').addEventListener('click', () => this.restart());
+        return true;
     },
 
     onTestComplete(testId, result, trials) {
+        if (!this.canContinueOwnedSession()) return false;
         this.results[testId] = result;
         this.trialData[testId] = trials;
         this.currentTestIndex++;
@@ -1153,15 +1610,17 @@ const App = {
             this.sessionStage = 'break';
             this.persistSession();
             this.showBreak();
-            return;
+            return true;
         }
 
         this.sessionStage = 'results';
         this.persistSession();
         this.showResults();
+        return true;
     },
 
-    showBreak() {
+    showBreak({ focusHeading = false } = {}) {
+        if (!this.canContinueOwnedSession()) return false;
         const content = this.getTestContent();
         const completed = this.currentTestIndex;
         const total = this.selectedTests.length;
@@ -1173,7 +1632,7 @@ const App = {
 
         content.innerHTML = `
             <div class="instructions">
-                <h2>${this.t('common.breakScreen.heading')}</h2>
+                <h2 id="break-screen-heading" tabindex="-1">${this.t('common.breakScreen.heading')}</h2>
                 <p>${this.t('common.breakScreen.complete', { completed, total })}</p>
                 <p>${this.t('common.breakScreen.next', { task: nextTestInfo.name, domain: nextTestInfo.domain })}</p>
                 <p>${this.t('common.breakScreen.instruction')}</p>
@@ -1183,11 +1642,15 @@ const App = {
 
         this.bindPrimaryAdvance('btn-break-next', () => this.advanceFromBreak());
         this.persistSession();
+        if (focusHeading) document.getElementById('break-screen-heading')?.focus();
+        return true;
     },
 
     advanceFromBreak() {
+        if (!this.canContinueOwnedSession()) return false;
         this.clearPrimaryAdvanceBinding();
         this.runCurrentTest();
+        return true;
     },
 
     showScreen(screenId) {
@@ -1223,7 +1686,8 @@ const App = {
         if (fillEl) fillEl.style.width = `${progress}%`;
     },
 
-    showResults() {
+    showResults({ focusHeading = false } = {}) {
+        if (!this.canContinueOwnedSession()) return false;
         this.showScreen('screen-results');
         this.updateTestStatus('');
         const container = document.getElementById('results-summary');
@@ -1273,6 +1737,8 @@ const App = {
 
         container.innerHTML = html;
         this.persistSession();
+        if (focusHeading) document.getElementById('results-heading')?.focus();
+        return true;
     },
 
     getQualitySummary() {
@@ -1322,6 +1788,7 @@ const App = {
             ? 'Researcher-configured fixed task order; within-task randomization uses mulberry32 with independently derived task seeds.'
             : 'mulberry32 seedable PRNG with independently derived task seeds; Williams-design sessions use FNV-1a participant ID hash to choose one of 14 task orders.';
         return {
+            session_instance_id: this.sessionInstanceId,
             app_version: this.APP_VERSION,
             protocol_version: this.PROTOCOL_VERSION,
             task_version: this.TASK_VERSION,
@@ -1609,7 +2076,7 @@ const App = {
         );
         addFlag('environment_block_flag', summary.block_count > 0, this.t('common.qualityFlags.block', { count: summary.block_count }));
         addFlag('environment_warning_flag', summary.warning_count > 0, this.t('common.qualityFlags.warning', { count: summary.warning_count }));
-        addFlag('storage_unavailable_flag', env.localStorageAvailable === 0, this.t('common.qualityFlags.storage'));
+        addFlag('storage_unavailable_flag', env.localStorageAvailable === 0 || env.webLocksAvailable === 0, this.t('common.qualityFlags.storage'));
 
         const lowAccuracyItems = [];
         const practiceRepeatItems = [];
@@ -2022,7 +2489,8 @@ const App = {
 
     // ==================== Excel Export ====================
 
-    downloadExcel() {
+    async downloadExcel() {
+        if (!this.canContinueOwnedSession()) return false;
         if (typeof XLSX === 'undefined') {
             alert(this.t('common.alerts.xlsxMissing'));
             return;
@@ -2042,6 +2510,7 @@ const App = {
         const exportedAt = new Date().toISOString();
         const thresholds = (this.quality && this.quality.outlier_thresholds) || {};
         const participantSheetRow = {
+            session_instance_id: this.sessionInstanceId,
             participantName: this.participantName || null,
             participantId: this.participantId,
             age: this.participantAge,
@@ -2069,6 +2538,7 @@ const App = {
             cookies_enabled: this.quality.environment.cookiesEnabled,
             local_storage_available: this.quality.environment.localStorageAvailable,
             session_storage_available: this.quality.environment.sessionStorageAvailable,
+            web_locks_available: this.quality.environment.webLocksAvailable,
             refresh_rate_hz_estimate: this.quality.environment.refreshRateHzEstimate,
             warning_count: this.quality.warnings.length,
             block_count: this.quality.blocks.length,
@@ -2206,16 +2676,21 @@ const App = {
         const safeParticipantId = this.sanitizeFileNamePart(this.participantId || 'participant');
         const prefix = `${safeParticipantId}_${this.startTime.toISOString().slice(0, 10)}`;
 
-        try {
-            XLSX.writeFile(wb, `cognitive_battery_${prefix}.xlsx`);
-        } catch (error) {
-            console.error('Failed to save workbook.', error);
-            alert(this.t('common.alerts.excelFailed'));
-        }
+        return this.runOwnedSessionExport(() => {
+            try {
+                XLSX.writeFile(wb, `cognitive_battery_${prefix}.xlsx`);
+                return true;
+            } catch (error) {
+                console.error('Failed to save workbook.', error);
+                alert(this.t('common.alerts.excelFailed'));
+                return false;
+            }
+        });
     },
 
     buildCodebook() {
         return [
+            { sheet: 'Participant / Protocol Metadata', field: 'session_instance_id', unit: '-', description: '同時タブ間の保存競合を検出するセッション固有ID。参加者識別子ではない' },
             { sheet: 'Participant', field: 'participantName', unit: '-', description: '参加者氏名（任意・未記入可）' },
             { sheet: 'Participant', field: 'participantId', unit: '-', description: '参加者ID（必須）' },
             { sheet: 'Participant', field: 'age', unit: '歳', description: '自己申告年齢（18-85）' },
@@ -2248,7 +2723,7 @@ const App = {
             { sheet: 'Participant', field: 'device_memory_gb', unit: 'GB', description: 'navigator.deviceMemory が提供される場合の概算メモリ量' },
             { sheet: 'Participant', field: 'color_depth / pixel_depth', unit: 'bit', description: 'screen.colorDepth / screen.pixelDepth' },
             { sheet: 'Participant', field: 'timezone / timezone_offset_minutes', unit: '-', description: '実施端末のタイムゾーン情報' },
-            { sheet: 'Participant', field: 'local_storage_available / session_storage_available', unit: '1/0', description: 'ブラウザストレージが利用可能かどうか' },
+            { sheet: 'Participant', field: 'local_storage_available / session_storage_available / web_locks_available', unit: '1/0', description: 'ブラウザストレージと、安全な複数タブ排他制御に必要な Web Locks API が利用可能かどうか' },
             { sheet: 'Participant', field: 'refresh_rate_hz_estimate', unit: 'Hz', description: 'requestAnimationFrame 間隔から推定した表示リフレッシュレート' },
             { sheet: 'Participant', field: 'rt_too_fast_ms', unit: 'ms', description: '品質ログ集計時の「極端に速い反応」閾値（集計のみに使用）' },
             { sheet: 'Participant', field: 'rt_too_slow_ms', unit: 'ms', description: '品質ログ集計時の「極端に遅い反応」閾値' },
@@ -2378,6 +2853,7 @@ const App = {
     },
 
     async downloadJson() {
+        if (!this.canContinueOwnedSession()) return false;
         if (!this.startTime) {
             alert(this.t('common.alerts.noSession'));
             return;
@@ -2393,13 +2869,19 @@ const App = {
         anchor.href = url;
         anchor.download = `cognitive_battery_${prefix}.json`;
         document.body.appendChild(anchor);
-        anchor.click();
-        document.body.removeChild(anchor);
+        const exported = await this.runOwnedSessionExport(() => {
+            anchor.click();
+            return true;
+        });
+        anchor.remove();
 
-        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        if (exported) setTimeout(() => URL.revokeObjectURL(url), 1000);
+        else URL.revokeObjectURL(url);
+        return exported;
     },
 
     async buildJsonPayload() {
+        if (!this.canContinueOwnedSession()) throw new Error('session_storage_ownership_lost');
         const protocol = this.sessionProtocolMetadata || this.buildProtocolMetadata();
         const qualityFlags = this.buildQualityFlags();
         const qcMultiverseRows = this.buildQcMultiverseRows();
@@ -2409,6 +2891,7 @@ const App = {
             protocol,
             study_configuration: StudyConfig.publicSessionConfiguration(),
             participant: {
+                session_instance_id: this.sessionInstanceId,
                 participantName: this.participantName || null,
                 participantId: this.participantId,
                 age: this.participantAge,
@@ -2618,11 +3101,29 @@ const App = {
         return value.replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_').replace(/\s+/g, '_');
     },
 
-    persistSession() {
-        if (!this.startTime) return;
-        if (this.privacyMode) {
-            try { localStorage.removeItem(this.STORAGE_KEY); } catch (e) { /* ignore */ }
-            return;
+    async persistSession(options = {}) {
+        if (!this.startTime) return false;
+        if (this.privacyMode) return true;
+        try {
+            return await this.withSessionStorageLock(() => this.persistSessionNow(options));
+        } catch (error) {
+            console.error('Session persistence lock failed.', error);
+            return false;
+        }
+    },
+
+    persistSessionNow({ claim = false, expectedRaw = null } = {}) {
+        if (!this.startTime) return false;
+        if (this.privacyMode) return true;
+
+        const currentStorage = this.inspectSavedSessionStorage();
+        if (claim) {
+            if (currentStorage.raw !== expectedRaw) return false;
+            if (!this.sessionInstanceId) this.sessionInstanceId = this.generateSessionStorageToken('session');
+            if (!this.sessionWriterId) this.sessionWriterId = this.generateSessionStorageToken('writer');
+        } else if (this.sessionStorageOwnershipLost || !this.ownsSavedSessionPayload(currentStorage.saved)) {
+            this.handleSessionStorageOwnershipLoss();
+            return false;
         }
 
         const hasVersionedStudyConfig = Boolean(this.studyConfig && this.studyConfigHash);
@@ -2654,6 +3155,8 @@ const App = {
             sessionElapsedMsAtSave: this.sessionElapsedMs(),
             sessionNumber: this.sessionNumber,
             counterbalanceGroup: this.counterbalanceGroup,
+            sessionInstanceId: this.sessionInstanceId,
+            sessionWriterId: this.sessionWriterId,
             studyConfig: this.studyConfig,
             studyConfigHash: this.studyConfigHash,
             resolvedTaskOrder: this.resolvedTaskOrder,
@@ -2661,15 +3164,28 @@ const App = {
         };
 
         try {
-            localStorage.setItem(this.STORAGE_KEY, JSON.stringify(payload));
+            const raw = JSON.stringify(payload);
+            localStorage.setItem(this.STORAGE_KEY, raw);
+            this.sessionStorageLastRaw = raw;
+            return true;
         } catch (error) {
             console.error('Failed to persist session.', error);
+            return false;
         }
     },
 
-    restart() {
+    async restart() {
         this.clearPrimaryAdvanceBinding();
         this.unlockLanguage();
+
+        const ownedSessionRaw = this.privacyMode ? null : this.sessionStorageLastRaw;
+        if (ownedSessionRaw !== null) {
+            await this.discardSavedSession({
+                confirmDiscard: false,
+                expectedRaw: ownedSessionRaw,
+                focusAfterDiscard: false,
+            });
+        }
 
         this.participantName = '';
         this.participantId = '';
@@ -2680,6 +3196,10 @@ const App = {
         this.privacyMode = false;
         this.sessionNumber = 1;
         this.counterbalanceGroup = null;
+        this.sessionInstanceId = null;
+        this.sessionWriterId = null;
+        this.sessionStorageLastRaw = null;
+        this.sessionStorageOwnershipLost = false;
         this.studyConfig = StudyConfig.activeConfig || null;
         this.studyConfigHash = this.studyConfig ? this.studyConfig.config_hash : null;
         this.resolvedTaskOrder = [];
@@ -2697,7 +3217,6 @@ const App = {
         this.inProgressTestId = null;
         this.quality = this.createQualityState();
         this.clearStartError();
-        this.discardSavedSession();
 
         const startButton = document.getElementById('btn-start');
         if (startButton) startButton.disabled = false;
@@ -2761,6 +3280,7 @@ const App = {
     },
 
     bindPrimaryAdvance(buttonId, action) {
+        if (!this.canContinueOwnedSession()) return;
         const button = document.getElementById(buttonId);
         if (!button) return;
 
@@ -2769,6 +3289,7 @@ const App = {
         let activated = false;
         const activate = () => {
             if (activated) return;
+            if (!this.canContinueOwnedSession()) return;
             activated = true;
             this.clearPrimaryAdvanceBinding();
             action();
