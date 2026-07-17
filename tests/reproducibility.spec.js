@@ -43,26 +43,37 @@ test('counterbalance: same participant ID → same order', async ({ page }) => {
     // With FNV-1a hashing, P001 and P002 should land in different groups often but not guaranteed.
     // We only assert the hash is stable — the not-equal expectation is a sanity check over many IDs.
     // Test below covers coverage.
-    expect(a.order).toHaveLength(5);
+    expect(a.order).toHaveLength(7);
 });
 
-test('counterbalance: Latin square rows use each task exactly once', async ({ page }) => {
-    const square = await page.evaluate(() => App.COUNTERBALANCE_LATIN_SQUARE);
-    for (const row of square) {
-        expect(row).toHaveLength(5);
-        expect(new Set(row).size).toBe(5);
+test('counterbalance: Williams rows use each task exactly once', async ({ page }) => {
+    const design = await page.evaluate(() => App.COUNTERBALANCE_WILLIAMS_DESIGN);
+    expect(design).toHaveLength(14);
+    for (const row of design) {
+        expect(row).toHaveLength(7);
+        expect(new Set(row).size).toBe(7);
     }
-    // Column-wise: each task appears in each column position across 5 rows (Latin property)
-    for (let col = 0; col < 5; col++) {
-        const column = square.map(r => r[col]);
-        expect(new Set(column).size).toBe(5);
+    // Each task occurs twice in every serial position across the 14 orders.
+    for (let col = 0; col < 7; col++) {
+        const counts = new Map();
+        design.forEach(row => counts.set(row[col], (counts.get(row[col]) || 0) + 1));
+        expect([...counts.values()]).toEqual([2, 2, 2, 2, 2, 2, 2]);
     }
+    const directedPairs = new Map();
+    for (const row of design) {
+        for (let index = 1; index < row.length; index++) {
+            const key = `${row[index - 1]}→${row[index]}`;
+            directedPairs.set(key, (directedPairs.get(key) || 0) + 1);
+        }
+    }
+    expect(directedPairs.size).toBe(42);
+    expect(new Set(directedPairs.values())).toEqual(new Set([2]));
 });
 
 test('counterbalance: hashing disperses participant IDs across groups', async ({ page }) => {
     const counts = await page.evaluate(() => {
-        const counts = [0, 0, 0, 0, 0];
-        for (let i = 0; i < 500; i++) {
+        const counts = Array(14).fill(0);
+        for (let i = 0; i < 1400; i++) {
             const id = `participant_${i}_${(i * 31) ^ 0x5f3759df}`;
             const g = App.counterbalanceOrderFor(id).group;
             counts[g]++;
@@ -71,7 +82,22 @@ test('counterbalance: hashing disperses participant IDs across groups', async ({
     });
     // Expect roughly uniform; no bucket should be empty and none should dominate
     for (const c of counts) {
-        expect(c).toBeGreaterThan(30); // >6% of 500
-        expect(c).toBeLessThan(250); // <50% of 500
+        expect(c).toBeGreaterThan(30);
+        expect(c).toBeLessThan(180);
     }
+});
+
+test('task seeds are stable and independent by namespace', async ({ page }) => {
+    const seeds = await page.evaluate(() => {
+        App.participantId = 'P-SEED';
+        App.sessionNumber = 2;
+        App.seedRandom(123456);
+        return {
+            digitA: App.deriveTaskSeed('visual_digit_span'),
+            digitB: App.deriveTaskSeed('visual_digit_span'),
+            corsi: App.deriveTaskSeed('ecorsi'),
+        };
+    });
+    expect(seeds.digitA).toBe(seeds.digitB);
+    expect(seeds.digitA).not.toBe(seeds.corsi);
 });

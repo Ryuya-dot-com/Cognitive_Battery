@@ -18,6 +18,8 @@ suppressPackageStartupMessages({
   library(readxl)
 })
 
+LEGACY_STUDY_CONFIG_HASH <- "__legacy_no_study_config__"
+
 args <- commandArgs(trailingOnly = TRUE)
 if (length(args) < 1) {
   stop("Usage: Rscript analyze.R <export-directory> [output.csv]")
@@ -82,6 +84,7 @@ read_xlsx_payload <- function(path) {
   participant_sheet <- first_row(sheet_rows(path, "Participant"))
   protocol <- metadata_rows_to_list(sheet_rows(path, "Protocol Metadata"))
   manifest <- metadata_rows_to_list(sheet_rows(path, "Export Manifest"))
+  study_configuration <- metadata_rows_to_list(sheet_rows(path, "Study Configuration"))
   session_quality <- first_row(sheet_rows(path, "Session Quality"))
   review_row <- first_row(sheet_rows(path, "Researcher Review"))
   research_metrics <- first_row(sheet_rows(path, "Research Metrics"))
@@ -93,6 +96,8 @@ read_xlsx_payload <- function(path) {
     dccs_raw = "dccs",
     pattern_comparison_raw = "pattern-comparison",
     list_sorting_raw = "list-sorting",
+    visual_digit_span_raw = "visual_digit_span",
+    ecorsi_raw = "ecorsi",
     picture_sequence_raw = "picture-sequence"
   )
   trials <- list()
@@ -106,8 +111,17 @@ read_xlsx_payload <- function(path) {
   participant <- list(
     participantId = participant_sheet$participantId %||% manifest$participant_id,
     session_number = participant_sheet$session_number %||% manifest$session_number,
+    study_config_hash = participant_sheet$study_config_hash %||%
+      protocol$study_config_hash %||%
+      manifest$study_config_hash %||%
+      study_configuration$study_config_hash,
     counterbalance_group = participant_sheet$counterbalance_group %||% manifest$counterbalance_group,
     consent_version = participant_sheet$consent_version %||% protocol$consent_version,
+    ui_language = participant_sheet$ui_language %||% protocol$ui_language,
+    instruction_language = participant_sheet$instruction_language %||% protocol$instruction_language,
+    stimulus_language = participant_sheet$stimulus_language %||% protocol$stimulus_language,
+    consent_language = participant_sheet$consent_language %||% protocol$consent_language,
+    translation_version = participant_sheet$translation_version %||% protocol$translation_version,
     age = participant_sheet$age,
     random_seed = participant_sheet$random_seed %||% manifest$random_seed,
     viewing_distance_cm = participant_sheet$viewing_distance_cm,
@@ -129,6 +143,7 @@ read_xlsx_payload <- function(path) {
   list(
     version = protocol$app_version %||% manifest$app_version,
     export_manifest = manifest,
+    study_configuration = study_configuration,
     participant = participant,
     protocol = protocol,
     outlier_thresholds = outlier_thresholds,
@@ -196,8 +211,15 @@ process_file <- function(path) {
 
   data.frame(
     file = basename(path),
+    study_config_hash = study_config_hash_from_payload(parsed),
     participant_id = participant$participantId,
     session_number = participant$session_number %||% NA,
+    consent_version = participant$consent_version %||% protocol$consent_version %||% NA,
+    ui_language = participant$ui_language %||% protocol$ui_language %||% NA,
+    instruction_language = participant$instruction_language %||% protocol$instruction_language %||% NA,
+    stimulus_language = participant$stimulus_language %||% protocol$stimulus_language %||% NA,
+    consent_language = participant$consent_language %||% protocol$consent_language %||% NA,
+    translation_version = participant$translation_version %||% protocol$translation_version %||% NA,
     app_version = protocol$app_version %||% parsed$version %||% NA,
     protocol_version = protocol$protocol_version %||% NA,
     task_version = protocol$task_version %||% NA,
@@ -245,11 +267,41 @@ process_file <- function(path) {
     pc_accuracy = pc$accuracy_all %||% NA,
     pc_d_prime = parsed$research_metrics$pattern_comparison_d_prime %||% NA,
     pc_ies_correct_ms = parsed$research_metrics$pattern_comparison_ies_correct_ms %||% NA,
+    visual_digit_span_forward_span = parsed$research_metrics$visual_digit_span_forward_span %||% NA,
+    visual_digit_span_backward_span = parsed$research_metrics$visual_digit_span_backward_span %||% NA,
+    visual_digit_span_forward_correct_trials = parsed$research_metrics$visual_digit_span_forward_correct_trials %||% NA,
+    visual_digit_span_backward_correct_trials = parsed$research_metrics$visual_digit_span_backward_correct_trials %||% NA,
+    visual_digit_span_observed_item_visible_ms_mean = parsed$research_metrics$visual_digit_span_observed_item_visible_ms_mean %||% NA,
+    visual_digit_span_observed_item_soa_ms_mean = parsed$research_metrics$visual_digit_span_observed_item_soa_ms_mean %||% NA,
+    ecorsi_forward_span = parsed$research_metrics$ecorsi_forward_span %||% NA,
+    ecorsi_backward_span = parsed$research_metrics$ecorsi_backward_span %||% NA,
+    ecorsi_forward_span_x_correct_trials = parsed$research_metrics$ecorsi_forward_span_x_correct_trials %||% NA,
+    ecorsi_backward_span_x_correct_trials = parsed$research_metrics$ecorsi_backward_span_x_correct_trials %||% NA,
+    ecorsi_forward_mean_first_tap_latency_ms = parsed$research_metrics$ecorsi_forward_mean_first_tap_latency_ms %||% NA,
+    ecorsi_backward_mean_first_tap_latency_ms = parsed$research_metrics$ecorsi_backward_mean_first_tap_latency_ms %||% NA,
+    ecorsi_observed_item_visible_ms_mean = parsed$research_metrics$ecorsi_observed_item_visible_ms_mean %||% NA,
+    ecorsi_observed_item_soa_ms_mean = parsed$research_metrics$ecorsi_observed_item_soa_ms_mean %||% NA,
     stringsAsFactors = FALSE
   )
 }
 
 `%||%` <- function(a, b) if (is.null(a) || length(a) == 0) b else a
+
+study_config_hash_from_payload <- function(parsed) {
+  candidates <- list(
+    parsed$study_configuration$config_hash,
+    parsed$study_configuration$study_config_hash,
+    parsed$participant$study_config_hash,
+    parsed$protocol$study_config_hash,
+    parsed$export_manifest$study_config_hash
+  )
+  for (value in candidates) {
+    if (is.null(value) || length(value) == 0 || is.na(value[[1]])) next
+    normalized <- trimws(as.character(value[[1]]))
+    if (normalized != "") return(normalized)
+  }
+  LEGACY_STUDY_CONFIG_HASH
+}
 
 qc_multiverse_rows <- function(parsed) {
   rows <- parsed$qc_multiverse$universes
@@ -276,6 +328,7 @@ qc_ids <- function(rows, field) {
 process_qc_multiverse_file <- function(path) {
   parsed <- read_export_payload(path)$parsed
   participant <- parsed$participant
+  protocol <- parsed$protocol
   rows <- qc_multiverse_rows(parsed)
   if (length(rows) == 0) return(NULL)
 
@@ -286,8 +339,12 @@ process_qc_multiverse_file <- function(path) {
       value
     })
     flat$file <- basename(path)
+    flat$study_config_hash <- study_config_hash_from_payload(parsed)
     flat$participant_id <- participant$participantId
     flat$session_number <- participant$session_number %||% NA
+    flat$ui_language <- participant$ui_language %||% protocol$ui_language %||% NA
+    flat$stimulus_language <- participant$stimulus_language %||% protocol$stimulus_language %||% NA
+    flat$translation_version <- participant$translation_version %||% protocol$translation_version %||% NA
     as.data.frame(flat, stringsAsFactors = FALSE)
   }))
 }
@@ -302,10 +359,11 @@ if (!is.null(qc_df) && nrow(qc_df) > 0) {
   write.csv(qc_df, qc_out_csv, row.names = FALSE, fileEncoding = "UTF-8")
   cat(sprintf("Wrote %d QC multiverse rows to %s\n", nrow(qc_df), qc_out_csv))
 
-  join_keys <- c("file", "participant_id", "session_number")
+  join_keys <- c("study_config_hash", "participant_id", "session_number")
   qc_prefixed <- qc_df
-  qc_metric_columns <- setdiff(names(qc_prefixed), join_keys)
+  qc_metric_columns <- setdiff(names(qc_prefixed), c("file", join_keys))
   names(qc_prefixed)[names(qc_prefixed) %in% qc_metric_columns] <- paste0("qc_", qc_metric_columns)
+  qc_prefixed$file <- NULL
   summary_by_qc_df <- left_join(summary_df, qc_prefixed, by = join_keys)
   summary_by_qc_out_csv <- file.path(dirname(out_csv), paste0(tools::file_path_sans_ext(basename(out_csv)), "_by_qc_universe.csv"))
   write.csv(summary_by_qc_df, summary_by_qc_out_csv, row.names = FALSE, fileEncoding = "UTF-8")

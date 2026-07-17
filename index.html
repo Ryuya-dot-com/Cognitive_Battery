@@ -4,85 +4,106 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Cognitive Battery</title>
-    <link rel="stylesheet" href="css/style.css?v=20260526">
+    <link rel="icon" href="data:,">
+    <link rel="stylesheet" href="css/style.css?v=20260717-study-config1">
 </head>
 <body>
     <div id="app">
         <div id="screen-start" class="screen active">
             <header class="start-header">
                 <h1>Cognitive Battery</h1>
-                <p class="subtitle">認知機能テストバッテリー</p>
+                <p class="subtitle" data-i18n="common.app.subtitle">認知機能テストバッテリー</p>
             </header>
 
+            <section class="language-panel" aria-labelledby="language-heading">
+                <div class="language-copy">
+                    <h2 id="language-heading" data-i18n="common.language.heading">表示言語</h2>
+                    <p id="language-hint" data-i18n="common.language.hint">教示と画面に使用する言語を選択してください。開始後は変更できません。</p>
+                </div>
+                <div class="language-options" role="group" aria-labelledby="language-heading">
+                    <button type="button" class="language-option" data-locale="ja" aria-pressed="true" data-i18n="common.language.ja">日本語</button>
+                    <button type="button" class="language-option" data-locale="en" aria-pressed="false" data-i18n="common.language.en">English</button>
+                </div>
+            </section>
+
             <div id="saved-session" class="saved-session hidden"></div>
+            <section id="active-study-config-summary" class="active-study-config-summary hidden" aria-live="polite"></section>
 
             <div class="setup-grid">
                 <section class="consent-panel setup-card" aria-labelledby="consent-heading">
-                    <h2 id="consent-heading" class="panel-title">実施の説明と同意</h2>
+                    <h2 id="consent-heading" class="panel-title" data-i18n="common.consent.heading">実施の説明と同意</h2>
                     <div class="consent-body">
-                        <p><strong>目的:</strong> 認知機能（注意、抑制制御、認知的柔軟性、ワーキングメモリ、処理速度、エピソード記憶）を評価する約20〜30分の課題に参加いただきます。</p>
-                        <p><strong>データ:</strong> 回答、反応時間、画面操作ログ（タブ離脱・フォーカス離脱などの品質ログ）、ブラウザ環境情報を記録します。データは<strong>参加者の端末内にのみ保存</strong>され、結果の Excel ファイルは参加者自身がダウンロード・共有する形式です。サーバには送信されません。</p>
-                        <p><strong>個人情報:</strong> 参加者IDと年齢のみ必須です。氏名欄は任意であり、記入しないまま進めることもできます。研究利用時は ID のみでの識別を推奨します。</p>
-                        <p><strong>任意性:</strong> 参加は任意であり、途中でページを閉じて中断できます。中断時点までの未保存データは破棄されます。</p>
-                        <p><strong>連絡先:</strong> 試験の趣旨や結果について質問がある場合は、試験実施者にお問い合わせください。</p>
+                        <p data-i18n-html="common.consent.purpose"><strong>目的:</strong> 研究者または開始画面で選択された認知課題に参加いただきます。所要時間は課題構成により異なり、全7課題の場合は約30〜45分です。</p>
+                        <p data-i18n-html="common.consent.data"><strong>データ:</strong> 回答、反応時間、画面操作ログ（タブ離脱・フォーカス離脱などの品質ログ）、ブラウザ環境情報を記録します。データは<strong>参加者の端末内にのみ保存</strong>され、結果の Excel ファイルは参加者自身がダウンロード・共有する形式です。サーバには送信されません。</p>
+                        <p data-i18n-html="common.consent.privacy"><strong>個人情報:</strong> 参加者IDと年齢のみ必須です。氏名欄は任意であり、記入しないまま進めることもできます。研究利用時は ID のみでの識別を推奨します。</p>
+                        <p data-i18n-html="common.consent.voluntary"><strong>任意性:</strong> 参加は任意であり、途中でページを閉じて中断できます。中断時点までの未保存データは破棄されます。</p>
+                        <p data-i18n-html="common.consent.contact"><strong>連絡先:</strong> 試験の趣旨や結果について質問がある場合は、試験実施者にお問い合わせください。</p>
                     </div>
                     <label class="checkbox-label consent-checkbox-label">
                         <input type="checkbox" id="consent-agree">
-                        上記を読み、理解した上で参加に同意します
+                        <span data-i18n="common.consent.agree">上記を読み、理解した上で参加に同意します</span>
                     </label>
                     <label class="checkbox-label consent-optional-label">
                         <input type="checkbox" id="privacy-no-persist">
-                        共有 PC で実施するため、この端末に進行状況を保存しない（途中復元できなくなります）
+                        <span data-i18n="common.consent.noPersist">共有 PC で実施するため、この端末に進行状況を保存しない（途中復元できなくなります）</span>
                     </label>
                 </section>
 
                 <section class="participant-panel setup-card" aria-labelledby="participant-heading">
-                    <h2 id="participant-heading" class="panel-title">参加者情報</h2>
+                    <h2 id="participant-heading" class="panel-title" data-i18n="common.participant.heading">参加者情報</h2>
                     <div class="form-group">
-                        <label for="participant-id">参加者ID <span class="required-tag">必須</span></label>
-                        <input type="text" id="participant-id" placeholder="例: P001" aria-required="true">
+                        <label for="participant-id"><span data-i18n="common.participant.id">参加者ID</span> <span class="required-tag" data-i18n="common.participant.required">必須</span></label>
+                        <input type="text" id="participant-id" placeholder="例: P001" data-i18n-placeholder="common.participant.idPlaceholder" aria-required="true">
                     </div>
                     <div class="form-group">
-                        <label for="participant-age">年齢 <span class="required-tag">必須</span></label>
-                        <input type="number" id="participant-age" min="18" max="85" placeholder="18-85" aria-required="true">
+                        <label for="participant-age"><span data-i18n="common.participant.age">年齢</span> <span class="required-tag" data-i18n="common.participant.required">必須</span></label>
+                        <input type="number" id="participant-age" min="18" max="85" placeholder="18-85" data-i18n-placeholder="common.participant.agePlaceholder" aria-required="true">
                     </div>
                     <div class="form-group">
-                        <label for="participant-viewing-distance">画面までの目の距離 (cm) <span class="optional-tag">任意</span></label>
-                        <input type="number" id="participant-viewing-distance" min="30" max="150" placeholder="例: 60">
-                        <p class="field-hint">視覚度換算の参考値として記録されます。</p>
+                        <label for="participant-viewing-distance"><span data-i18n="common.participant.distance">画面までの目の距離 (cm)</span> <span class="optional-tag" data-i18n="common.participant.optional">任意</span></label>
+                        <input type="number" id="participant-viewing-distance" min="30" max="150" placeholder="例: 60" data-i18n-placeholder="common.participant.distancePlaceholder">
+                        <p class="field-hint" data-i18n="common.participant.distanceHint">視覚度換算の参考値として記録されます。</p>
                     </div>
                     <div class="form-group">
-                        <label for="participant-name">氏名 <span class="optional-tag">任意</span></label>
-                        <input type="text" id="participant-name" placeholder="記入しなくても進められます" autocomplete="off">
-                        <p class="field-hint">研究データとしては参加者IDのみを利用します。</p>
+                        <label for="participant-name"><span data-i18n="common.participant.name">氏名</span> <span class="optional-tag" data-i18n="common.participant.optional">任意</span></label>
+                        <input type="text" id="participant-name" placeholder="記入しなくても進められます" data-i18n-placeholder="common.participant.namePlaceholder" autocomplete="off">
+                        <p class="field-hint" data-i18n="common.participant.nameHint">研究データとしては参加者IDのみを利用します。</p>
                     </div>
-                    <div class="form-group">
-                        <label>実施するテスト</label>
+                    <div class="form-group" id="participant-task-selection">
+                        <label data-i18n="common.participant.tests">実施するテスト</label>
                         <div class="test-select">
                             <label class="checkbox-label">
                                 <input type="checkbox" id="select-all-tests" checked>
-                                すべてのテストを実施
+                                <span data-i18n="common.participant.selectAll">すべてのテストを実施</span>
                             </label>
                             <div id="individual-tests" class="individual-tests hidden">
                                 <label class="checkbox-label">
                                     <input type="checkbox" class="test-checkbox" value="flanker" checked>
-                                    1. フランカー課題（抑制制御・注意）
+                                    <span data-i18n="common.tasks.flanker.list">1. フランカー課題（抑制制御・注意）</span>
                                 </label>
                                 <label class="checkbox-label">
                                     <input type="checkbox" class="test-checkbox" value="dccs" checked>
-                                    2. カード分類課題（認知的柔軟性）
+                                    <span data-i18n="common.tasks.dccs.list">2. カード分類課題（認知的柔軟性）</span>
                                 </label>
                                 <label class="checkbox-label">
                                     <input type="checkbox" class="test-checkbox" value="list-sorting" checked>
-                                    3. リストソート課題（ワーキングメモリ）
+                                    <span data-i18n="common.tasks.listSorting.list">3. リストソート課題（ワーキングメモリ）</span>
+                                </label>
+                                <label class="checkbox-label">
+                                    <input type="checkbox" class="test-checkbox" value="visual_digit_span" checked>
+                                    <span data-i18n="common.tasks.visualDigitSpan.list">4. 視覚的数字スパン課題（ワーキングメモリ）</span>
+                                </label>
+                                <label class="checkbox-label">
+                                    <input type="checkbox" class="test-checkbox" value="ecorsi" checked>
+                                    <span data-i18n="common.tasks.ecorsi.list">5. eCorsi ブロック課題（視空間ワーキングメモリ）</span>
                                 </label>
                                 <label class="checkbox-label">
                                     <input type="checkbox" class="test-checkbox" value="pattern-comparison" checked>
-                                    4. パターン比較課題（処理速度）
+                                    <span data-i18n="common.tasks.patternComparison.list">6. パターン比較課題（処理速度）</span>
                                 </label>
                                 <label class="checkbox-label">
                                     <input type="checkbox" class="test-checkbox" value="picture-sequence" checked>
-                                    5. 系列記憶課題（エピソード記憶）
+                                    <span data-i18n="common.tasks.pictureSequence.list">7. 系列記憶課題（エピソード記憶）</span>
                                 </label>
                             </div>
                         </div>
@@ -90,11 +111,11 @@
                 </section>
 
                 <section class="preflight-panel setup-card" aria-labelledby="preflight-heading">
-                    <h2 id="preflight-heading" class="panel-title">実施前チェック</h2>
+                    <h2 id="preflight-heading" class="panel-title" data-i18n="common.preflight.heading">実施前チェック</h2>
                     <ul id="environment-check-list" class="environment-check-list"></ul>
 
                     <div class="grayscale-check">
-                        <p class="grayscale-label">ディスプレイ確認</p>
+                        <p class="grayscale-label" data-i18n="common.preflight.display">ディスプレイ確認</p>
                         <div class="grayscale-bar" aria-hidden="true">
                             <div class="grayscale-step" style="background:#000000;"></div>
                             <div class="grayscale-step" style="background:#242424;"></div>
@@ -105,28 +126,28 @@
                             <div class="grayscale-step" style="background:#dadada;"></div>
                             <div class="grayscale-step" style="background:#ffffff;"></div>
                         </div>
-                        <p class="field-hint">8段階のグレー（黒〜白）がすべて区別できることを確認してください。</p>
+                        <p class="field-hint" data-i18n="common.preflight.grayscaleHint">8段階のグレー（黒〜白）がすべて区別できることを確認してください。</p>
                     </div>
 
                     <div class="readiness-checks">
                         <label class="checkbox-label">
                             <input type="checkbox" class="readiness-checkbox" id="readiness-desktop">
-                            PC とキーボードを使える環境です
+                            <span data-i18n="common.preflight.desktop">PC とキーボードを使える環境です</span>
                         </label>
                         <label class="checkbox-label">
                             <input type="checkbox" class="readiness-checkbox" id="readiness-quiet">
-                            静かな場所で、途中離席せずに実施できます
+                            <span data-i18n="common.preflight.quiet">静かな場所で、途中離席せずに実施できます</span>
                         </label>
                         <label class="checkbox-label">
                             <input type="checkbox" class="readiness-checkbox" id="readiness-fullscreen">
-                            テスト中はタブ切替や画面縮小をしません
+                            <span data-i18n="common.preflight.fullscreen">テスト中はタブ切替や画面縮小をしません</span>
                         </label>
                         <label class="checkbox-label">
                             <input type="checkbox" class="readiness-checkbox" id="readiness-grayscale">
-                            上の 8 段階のグレーがすべて区別できる
+                            <span data-i18n="common.preflight.grayscale">上の 8 段階のグレーがすべて区別できる</span>
                         </label>
                     </div>
-                    <p class="preflight-note">
+                    <p class="preflight-note" data-i18n="common.preflight.note">
                         PC とキーボードで実施してください。テスト中にブラウザバックや再読み込みをすると警告が表示されます。
                     </p>
                 </section>
@@ -135,8 +156,126 @@
             <p id="start-error" class="form-error hidden" role="alert" aria-live="assertive"></p>
 
             <div class="start-action-bar">
-                <p class="start-action-note">準備が整ったら開始してください。課題中は画面中央の刺激に集中してください。</p>
-                <button id="btn-start" class="btn btn-primary">開始</button>
+                <p class="start-action-note" data-i18n="common.start.note">準備が整ったら開始してください。課題中は画面中央の刺激に集中してください。</p>
+                <button id="btn-start" class="btn btn-primary" data-i18n="common.start.button">開始</button>
+            </div>
+        </div>
+
+        <div id="screen-researcher-config" class="screen" data-testid="researcher-config-screen">
+            <header class="researcher-config-header">
+                <div class="researcher-header-row">
+                    <div>
+                        <p class="researcher-eyebrow" data-i18n="common.researcherConfig.eyebrow">研究者向け設定</p>
+                        <h1 data-i18n="common.researcherConfig.title">研究者用の研究設定</h1>
+                    </div>
+                    <div class="researcher-ui-language" role="group" aria-labelledby="researcher-ui-language-label">
+                        <span id="researcher-ui-language-label" data-i18n="common.researcherConfig.uiLanguage">研究者画面の言語</span>
+                        <button type="button" class="researcher-ui-language-option" data-locale="ja" aria-pressed="true">日本語</button>
+                        <button type="button" class="researcher-ui-language-option" data-locale="en" aria-pressed="false">English</button>
+                    </div>
+                </div>
+                <p class="subtitle" data-i18n="common.researcherConfig.subtitle">参加者に適用する実施条件を設定します。参加者情報や結果はプリセットに保存されません。</p>
+            </header>
+
+            <div class="study-config-grid">
+                <main class="study-config-main">
+                    <section class="setup-card researcher-config-card" aria-labelledby="study-identity-heading">
+                        <h2 id="study-identity-heading" class="panel-title" data-i18n="common.researcherConfig.identity.heading">研究設定</h2>
+                        <div class="researcher-field-grid">
+                            <div class="form-group">
+                                <label for="study-id" data-i18n="common.researcherConfig.identity.studyId">研究ID</label>
+                                <input type="text" id="study-id" maxlength="80" autocomplete="off" data-i18n-placeholder="common.researcherConfig.identity.studyIdPlaceholder">
+                                <p class="field-hint" data-i18n="common.researcherConfig.identity.studyIdHint">研究計画内で一意の、個人情報を含まないIDを指定してください。</p>
+                            </div>
+                            <div class="form-group">
+                                <label for="study-protocol-preset" data-i18n="common.researcherConfig.protocol.preset">プロトコルプリセット</label>
+                                <select id="study-protocol-preset" disabled aria-disabled="true">
+                                    <option value="literature-aligned-2026-07-v1" data-i18n="common.researcherConfig.protocol.presetLiterature">先行研究参照・固定版 2026-07 v1</option>
+                                </select>
+                                <p class="field-hint" data-i18n="common.researcherConfig.protocol.immutable">刺激、時間、試行数、採点条件はこのプリセットで固定されます。</p>
+                            </div>
+                        </div>
+                    </section>
+
+                    <section class="setup-card researcher-config-card" aria-labelledby="study-language-heading">
+                        <h2 id="study-language-heading" class="panel-title" data-i18n="common.researcherConfig.language.heading">実施言語</h2>
+                        <div class="researcher-field-grid compact-grid">
+                            <div class="form-group">
+                                <label for="study-language" data-i18n="common.researcherConfig.language.default">既定の言語</label>
+                                <select id="study-language">
+                                    <option value="ja">日本語</option>
+                                    <option value="en">English</option>
+                                </select>
+                            </div>
+                            <label class="checkbox-label config-lock-option">
+                                <input type="checkbox" id="lock-participant-language" checked>
+                                <span data-i18n="common.researcherConfig.language.lock">参加者による言語変更を禁止する</span>
+                            </label>
+                        </div>
+                    </section>
+
+                    <section class="setup-card researcher-config-card" aria-labelledby="study-tasks-heading">
+                        <h2 id="study-tasks-heading" class="panel-title" data-i18n="common.researcherConfig.tasks.heading">実施課題と順序</h2>
+                        <fieldset class="order-policy-fieldset">
+                            <legend data-i18n="common.researcherConfig.order.heading">順序方式</legend>
+                            <label class="radio-card">
+                                <input type="radio" name="study-order-policy" value="williams" checked>
+                                <span>
+                                    <strong data-i18n="common.researcherConfig.order.williams">Williams design（推奨）</strong>
+                                    <small data-i18n="common.researcherConfig.order.williamsHint">全7課題を参加者IDに基づく14順序へ自動割当します。</small>
+                                </span>
+                            </label>
+                            <label class="radio-card">
+                                <input type="radio" name="study-order-policy" value="fixed">
+                                <span>
+                                    <strong data-i18n="common.researcherConfig.order.fixed">固定カスタム順序</strong>
+                                    <small data-i18n="common.researcherConfig.order.fixedHint">選択した課題をすべての参加者に同じ順序で実施します。</small>
+                                </span>
+                            </label>
+                        </fieldset>
+                        <p id="study-task-order-hint" class="field-hint" data-i18n="common.researcherConfig.tasks.hint">固定順序では課題の選択と並べ替えができます。選択済み課題の上下ボタンを使用してください。</p>
+                        <ol id="study-task-order-list" class="task-order-list" data-testid="task-order-list" aria-describedby="study-task-order-hint"></ol>
+                    </section>
+
+                    <section class="setup-card researcher-config-card" aria-labelledby="study-presets-heading">
+                        <h2 id="study-presets-heading" class="panel-title" data-i18n="common.researcherConfig.preset.heading">設定プリセット</h2>
+                        <div class="preset-controls">
+                            <div class="form-group">
+                                <label for="study-preset-name" data-i18n="common.researcherConfig.preset.name">プリセット名</label>
+                                <input type="text" id="study-preset-name" maxlength="80" autocomplete="off" data-i18n-placeholder="common.researcherConfig.preset.namePlaceholder">
+                            </div>
+                            <div class="form-group">
+                                <label for="study-preset-select" data-i18n="common.researcherConfig.preset.saved">保存済みプリセット</label>
+                                <select id="study-preset-select"></select>
+                            </div>
+                        </div>
+                        <div class="config-inline-actions">
+                            <button type="button" id="btn-save-study-preset" class="btn btn-secondary" data-i18n="common.researcherConfig.preset.save">保存</button>
+                            <button type="button" id="btn-load-study-preset" class="btn btn-secondary" data-i18n="common.researcherConfig.preset.load">読込</button>
+                            <button type="button" id="btn-delete-study-preset" class="btn btn-secondary" data-i18n="common.researcherConfig.preset.delete">削除</button>
+                            <button type="button" id="btn-copy-participant-link" class="btn btn-secondary" data-i18n="common.researcherConfig.link.copy">参加者リンクをコピー</button>
+                        </div>
+                    </section>
+                </main>
+
+                <aside class="study-config-sidebar">
+                    <section class="setup-card protocol-summary-card" aria-labelledby="protocol-summary-heading">
+                        <h2 id="protocol-summary-heading" class="panel-title" data-i18n="common.researcherConfig.protocol.heading">固定プロトコル概要</h2>
+                        <dl id="study-protocol-summary" class="protocol-summary-list"></dl>
+                        <div class="protocol-lock-note">
+                            <strong data-i18n="common.researcherConfig.protocol.lockedHeading">測定条件は固定</strong>
+                            <p data-i18n="common.researcherConfig.protocol.lockedBody">刺激バンク、提示時間、試行数、停止規則、採点方法は先行研究を参照した独自Web実装の固定版です。ここでは変更できません。</p>
+                        </div>
+                    </section>
+                </aside>
+            </div>
+
+            <p id="study-config-error" class="form-error hidden" role="alert" aria-live="assertive"></p>
+            <p id="study-config-status" class="config-status" role="status" aria-live="polite"></p>
+            <div class="researcher-config-actions">
+                <button type="button" id="btn-cancel-study-config" class="btn btn-secondary" data-i18n="common.researcherConfig.cancel">キャンセル</button>
+                <button type="button" id="btn-clear-study-config" class="btn btn-secondary" data-i18n="common.researcherConfig.clear">研究者設定を解除</button>
+                <button type="button" id="btn-apply-study-config" class="btn btn-primary" data-i18n="common.researcherConfig.apply">適用して参加者画面へ</button>
             </div>
         </div>
 
@@ -157,25 +296,29 @@
         </div>
 
         <div id="screen-results" class="screen">
-            <h1>テスト結果</h1>
+            <h1 data-i18n="common.results.heading">テスト結果</h1>
             <div id="results-summary"></div>
             <div class="button-group">
-                <button id="btn-download-excel" class="btn btn-primary">Excelファイルを保存</button>
+                <button id="btn-download-excel" class="btn btn-primary" data-i18n="common.results.saveExcel">Excelファイルを保存</button>
                 <details class="researcher-tools">
-                    <summary>研究者向け詳細</summary>
-                    <button id="btn-download-json" class="btn btn-secondary">JSONを保存</button>
+                    <summary data-i18n="common.results.researcher">研究者向け詳細</summary>
+                    <button id="btn-download-json" class="btn btn-secondary" data-i18n="common.results.saveJson">JSONを保存</button>
                 </details>
-                <button id="btn-restart" class="btn btn-primary">最初に戻る</button>
+                <button id="btn-restart" class="btn btn-primary" data-i18n="common.results.restart">最初に戻る</button>
             </div>
         </div>
     </div>
 
     <script src="vendor/xlsx.full.min.js"></script>
+    <script src="js/i18n.js"></script>
+    <script src="js/study-config.js"></script>
     <script src="js/main.js"></script>
     <script src="js/flanker.js"></script>
     <script src="js/pattern-comparison.js"></script>
     <script src="js/dccs.js"></script>
     <script src="js/list-sorting.js"></script>
+    <script src="js/visual-digit-span.js"></script>
+    <script src="js/ecorsi.js"></script>
     <script src="js/picture-sequence.js"></script>
 </body>
 </html>

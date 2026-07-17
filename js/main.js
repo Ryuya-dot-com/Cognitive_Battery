@@ -1,7 +1,7 @@
 // ==================== Cognitive Battery — Main Controller ====================
 
 /**
- * @typedef {'flanker'|'dccs'|'list-sorting'|'pattern-comparison'|'picture-sequence'} TestId
+ * @typedef {'flanker'|'dccs'|'list-sorting'|'visual_digit_span'|'ecorsi'|'pattern-comparison'|'picture-sequence'} TestId
  *
  * @typedef {object} FlankerTrial
  * @property {number} trialNum
@@ -73,16 +73,17 @@
 
 const App = {
     STORAGE_KEY: 'cognitive-battery-session-v2',
+    SESSION_PAYLOAD_VERSION: 3,
     MIN_VIEWPORT_WIDTH: 1024,
     MIN_VIEWPORT_HEIGHT: 700,
     QUALITY_EVENT_LIMIT: 200,
-    NAVIGATION_WARNING: 'テスト中です。ブラウザバックや再読み込みをすると、現在の課題は最初から再開になります。',
-    APP_VERSION: 'cb-2026-05-research-v5',
-    PROTOCOL_VERSION: 'protocol-2026-05-remote-adult-v1',
-    TASK_VERSION: 'tasks-2026-05-v1',
-    SCORING_VERSION: 'scoring-2026-05-v1',
-    STIMULUS_VERSION: 'stimuli-2026-05-system-emoji-v1',
-    STIMULUS_RENDERING_MODE: 'system-emoji',
+    get NAVIGATION_WARNING() { return this.t('common.navigationWarning'); },
+    APP_VERSION: 'cb-2026-07-research-v8',
+    PROTOCOL_VERSION: 'protocol-2026-07-study-config-v4',
+    TASK_VERSION: 'tasks-2026-07-v3',
+    SCORING_VERSION: 'scoring-2026-07-v2',
+    STIMULUS_VERSION: 'stimuli-2026-07-bilingual-v3',
+    STIMULUS_RENDERING_MODE: 'system-emoji+html-text-geometric',
     QUALITY_FLAG_THRESHOLDS: {
         lowAccuracyPercent: 60,
         pictureSequenceProportion: 0.25,
@@ -201,32 +202,147 @@ const App = {
     privacyMode: false,
     sessionNumber: 1,
     counterbalanceGroup: null,
+    studyConfig: null,
+    studyConfigHash: null,
+    resolvedTaskOrder: [],
+    sessionProtocolMetadata: null,
+    studyConfigError: '',
+    studyConfigErrorKey: '',
+    startTransitionInProgress: false,
     longTaskObserver: null,
     HISTORY_STORAGE_KEY: 'cognitive-battery-history-v2',
-    CONSENT_VERSION: '1.0.0',
-    COUNTERBALANCE_LATIN_SQUARE: [
-        ['flanker', 'dccs', 'list-sorting', 'pattern-comparison', 'picture-sequence'],
-        ['dccs', 'list-sorting', 'pattern-comparison', 'picture-sequence', 'flanker'],
-        ['list-sorting', 'pattern-comparison', 'picture-sequence', 'flanker', 'dccs'],
-        ['pattern-comparison', 'picture-sequence', 'flanker', 'dccs', 'list-sorting'],
-        ['picture-sequence', 'flanker', 'dccs', 'list-sorting', 'pattern-comparison'],
+    CONSENT_VERSION: '1.3.0',
+    CONSENT_VERSIONS: Object.freeze({ ja: '1.3.0-ja', en: '1.1.0-en' }),
+    sessionConsentVersion: null,
+    uiLanguage: I18n.getLocale(),
+    instructionLanguage: I18n.getLocale(),
+    stimulusLanguage: I18n.getLocale(),
+    consentLanguage: I18n.getLocale(),
+    languageLocked: false,
+    participantLanguageLocked: false,
+    ALL_TEST_IDS: [
+        'flanker',
+        'dccs',
+        'list-sorting',
+        'visual_digit_span',
+        'ecorsi',
+        'pattern-comparison',
+        'picture-sequence',
+    ],
+    ADAPTIVE_SPAN_TEST_IDS: ['visual_digit_span', 'ecorsi'],
+    // Odd-sized Williams designs require the seven rows plus their reversals
+    // to balance immediate carryover as well as serial position.
+    COUNTERBALANCE_WILLIAMS_DESIGN: [
+        ['flanker', 'dccs', 'picture-sequence', 'list-sorting', 'pattern-comparison', 'visual_digit_span', 'ecorsi'],
+        ['dccs', 'list-sorting', 'flanker', 'visual_digit_span', 'picture-sequence', 'ecorsi', 'pattern-comparison'],
+        ['list-sorting', 'visual_digit_span', 'dccs', 'ecorsi', 'flanker', 'pattern-comparison', 'picture-sequence'],
+        ['visual_digit_span', 'ecorsi', 'list-sorting', 'pattern-comparison', 'dccs', 'picture-sequence', 'flanker'],
+        ['ecorsi', 'pattern-comparison', 'visual_digit_span', 'picture-sequence', 'list-sorting', 'flanker', 'dccs'],
+        ['pattern-comparison', 'picture-sequence', 'ecorsi', 'flanker', 'visual_digit_span', 'dccs', 'list-sorting'],
+        ['picture-sequence', 'flanker', 'pattern-comparison', 'dccs', 'ecorsi', 'list-sorting', 'visual_digit_span'],
+        ['ecorsi', 'visual_digit_span', 'pattern-comparison', 'list-sorting', 'picture-sequence', 'dccs', 'flanker'],
+        ['pattern-comparison', 'ecorsi', 'picture-sequence', 'visual_digit_span', 'flanker', 'list-sorting', 'dccs'],
+        ['picture-sequence', 'pattern-comparison', 'flanker', 'ecorsi', 'dccs', 'visual_digit_span', 'list-sorting'],
+        ['flanker', 'picture-sequence', 'dccs', 'pattern-comparison', 'list-sorting', 'ecorsi', 'visual_digit_span'],
+        ['dccs', 'flanker', 'list-sorting', 'picture-sequence', 'visual_digit_span', 'pattern-comparison', 'ecorsi'],
+        ['list-sorting', 'dccs', 'visual_digit_span', 'flanker', 'ecorsi', 'picture-sequence', 'pattern-comparison'],
+        ['visual_digit_span', 'list-sorting', 'ecorsi', 'dccs', 'pattern-comparison', 'flanker', 'picture-sequence'],
     ],
 
     testRegistry: {
-        'flanker': { name: 'フランカー課題', domain: '抑制制御・注意', module: null },
-        'pattern-comparison': { name: 'パターン比較課題', domain: '処理速度', module: null },
-        'dccs': { name: 'カード分類課題', domain: '認知的柔軟性', module: null },
-        'list-sorting': { name: 'リストソート課題', domain: 'ワーキングメモリ', module: null },
-        'picture-sequence': { name: '系列記憶課題', domain: 'エピソード記憶', module: null },
+        'flanker': { nameKey: 'common.tasks.flanker.name', domainKey: 'common.tasks.flanker.domain', get name() { return I18n.t(this.nameKey); }, get domain() { return I18n.t(this.domainKey); }, module: null },
+        'pattern-comparison': { nameKey: 'common.tasks.patternComparison.name', domainKey: 'common.tasks.patternComparison.domain', get name() { return I18n.t(this.nameKey); }, get domain() { return I18n.t(this.domainKey); }, module: null },
+        'dccs': { nameKey: 'common.tasks.dccs.name', domainKey: 'common.tasks.dccs.domain', get name() { return I18n.t(this.nameKey); }, get domain() { return I18n.t(this.domainKey); }, module: null },
+        'list-sorting': { nameKey: 'common.tasks.listSorting.name', domainKey: 'common.tasks.listSorting.domain', get name() { return I18n.t(this.nameKey); }, get domain() { return I18n.t(this.domainKey); }, module: null },
+        'visual_digit_span': { nameKey: 'common.tasks.visualDigitSpan.name', domainKey: 'common.tasks.visualDigitSpan.domain', get name() { return I18n.t(this.nameKey); }, get domain() { return I18n.t(this.domainKey); }, module: null },
+        'ecorsi': { nameKey: 'common.tasks.ecorsi.name', domainKey: 'common.tasks.ecorsi.domain', get name() { return I18n.t(this.nameKey); }, get domain() { return I18n.t(this.domainKey); }, module: null },
+        'picture-sequence': { nameKey: 'common.tasks.pictureSequence.name', domainKey: 'common.tasks.pictureSequence.domain', get name() { return I18n.t(this.nameKey); }, get domain() { return I18n.t(this.domainKey); }, module: null },
     },
 
-    init() {
+    async init() {
+        this.initLanguageControls();
         this.quality = this.createQualityState();
+        await StudyConfig.init(this);
         this.bindEvents();
         this.bindQualityListeners();
         this.initLongTaskObserver();
         this.renderEnvironmentChecks();
         this.renderSavedSessionBanner();
+    },
+
+    t(key, params = {}) {
+        return I18n.t(key, params);
+    },
+
+    getConsentVersion(locale = this.consentLanguage || this.uiLanguage || I18n.getLocale()) {
+        return this.CONSENT_VERSIONS[locale] || this.CONSENT_VERSIONS.ja;
+    },
+
+    getActiveConsentVersion() {
+        return this.sessionConsentVersion || this.getConsentVersion();
+    },
+
+    initLanguageControls() {
+        const initialLocale = I18n.getLocale();
+        this.uiLanguage = initialLocale;
+        this.instructionLanguage = initialLocale;
+        this.stimulusLanguage = initialLocale;
+        this.consentLanguage = initialLocale;
+        I18n.apply(document);
+
+        document.querySelectorAll('.language-option').forEach((button) => {
+            button.addEventListener('click', () => {
+                if (this.languageLocked) return;
+                this.setLanguage(button.dataset.locale);
+            });
+        });
+        this.updateLanguageControls();
+    },
+
+    setLanguage(locale, { force = false, resetConsent = true } = {}) {
+        if ((this.languageLocked || this.participantLanguageLocked) && !force) return false;
+        const previousLocale = this.uiLanguage;
+        const nextLocale = I18n.setLocale(locale);
+        this.uiLanguage = nextLocale;
+        this.instructionLanguage = nextLocale;
+        this.stimulusLanguage = nextLocale;
+        this.consentLanguage = nextLocale;
+
+        if (resetConsent && previousLocale !== nextLocale) {
+            const consentEl = document.getElementById('consent-agree');
+            if (consentEl) consentEl.checked = false;
+            this.consentAccepted = false;
+            this.sessionConsentVersion = null;
+            if (this.studyConfigErrorKey) {
+                this.studyConfigError = this.t(this.studyConfigErrorKey);
+                this.setStartError(this.studyConfigError);
+            } else {
+                this.setStartError('');
+            }
+        }
+
+        this.updateLanguageControls();
+        if (this.quality) this.renderEnvironmentChecks();
+        this.renderSavedSessionBanner();
+        return true;
+    },
+
+    updateLanguageControls() {
+        document.querySelectorAll('.language-option').forEach((button) => {
+            const selected = button.dataset.locale === this.uiLanguage;
+            button.setAttribute('aria-pressed', selected ? 'true' : 'false');
+            button.disabled = this.languageLocked || this.participantLanguageLocked;
+        });
+    },
+
+    lockLanguage() {
+        this.languageLocked = true;
+        this.updateLanguageControls();
+    },
+
+    unlockLanguage() {
+        this.languageLocked = false;
+        this.updateLanguageControls();
     },
 
     initLongTaskObserver() {
@@ -281,19 +397,19 @@ const App = {
 
         ['participant-name', 'participant-id', 'participant-age', 'participant-viewing-distance'].forEach(id => {
             const el = document.getElementById(id);
-            if (el) el.addEventListener('input', () => this.setStartError(''));
+            if (el) el.addEventListener('input', () => this.clearStartError());
         });
 
         const consentEl = document.getElementById('consent-agree');
         if (consentEl) {
             consentEl.addEventListener('change', () => {
                 this.consentAccepted = consentEl.checked;
-                this.setStartError('');
+                this.clearStartError();
             });
         }
 
         document.querySelectorAll('.readiness-checkbox').forEach(cb => {
-            cb.addEventListener('change', () => this.setStartError(''));
+            cb.addEventListener('change', () => this.clearStartError());
         });
     },
 
@@ -386,6 +502,11 @@ const App = {
             warnings: [],
             blocks: [],
             events: [],
+            ui_language: this.uiLanguage,
+            instruction_language: this.instructionLanguage,
+            stimulus_language: this.stimulusLanguage,
+            consent_language: this.consentLanguage,
+            translation_version: I18n.TRANSLATION_VERSION,
         };
     },
 
@@ -451,38 +572,38 @@ const App = {
             {
                 key: 'device',
                 status: isMobileUA ? 'fail' : 'pass',
-                label: isMobileUA ? 'モバイル端末が検出されました' : 'PC 環境が検出されました',
-                detail: 'スマートフォンやタブレットでの実施は推奨しません。',
+                label: this.t(isMobileUA ? 'common.environment.mobile' : 'common.environment.pc'),
+                detail: this.t('common.environment.mobileDetail'),
             },
             {
                 key: 'viewport',
                 status: (env.viewportWidth >= this.MIN_VIEWPORT_WIDTH && env.viewportHeight >= this.MIN_VIEWPORT_HEIGHT) ? 'pass' : 'fail',
-                label: `表示領域 ${env.viewportWidth} × ${env.viewportHeight}`,
-                detail: `推奨は ${this.MIN_VIEWPORT_WIDTH} × ${this.MIN_VIEWPORT_HEIGHT} 以上です。`,
+                label: this.t('common.environment.viewport', { width: env.viewportWidth, height: env.viewportHeight }),
+                detail: this.t('common.environment.viewportDetail', { width: this.MIN_VIEWPORT_WIDTH, height: this.MIN_VIEWPORT_HEIGHT }),
             },
             {
                 key: 'browser',
                 status: 'pass',
-                label: `ブラウザ: ${browser}`,
-                detail: 'ブラウザバックや再読み込みをすると警告が表示されます。',
+                label: this.t('common.environment.browser', { browser }),
+                detail: this.t('common.environment.browserDetail'),
             },
             {
                 key: 'touch',
                 status: hasTouch ? 'warn' : 'pass',
-                label: hasTouch ? 'タッチ入力対応端末です' : 'キーボード中心の端末です',
-                detail: '本テストはキーボード操作を前提に設計されています。',
+                label: this.t(hasTouch ? 'common.environment.touch' : 'common.environment.keyboard'),
+                detail: this.t('common.environment.touchDetail'),
             },
             {
                 key: 'fullscreen',
                 status: document.fullscreenEnabled ? 'pass' : 'warn',
-                label: document.fullscreenEnabled ? 'フルスクリーンに対応しています' : 'フルスクリーン未対応です',
-                detail: '実施中はフルスクリーンを推奨します。',
+                label: this.t(document.fullscreenEnabled ? 'common.environment.fullscreenYes' : 'common.environment.fullscreenNo'),
+                detail: this.t('common.environment.fullscreenDetail'),
             },
             {
                 key: 'storage',
                 status: env.localStorageAvailable ? 'pass' : 'warn',
-                label: env.localStorageAvailable ? 'セッション復元に対応しています' : 'セッション復元を利用できません',
-                detail: 'localStorage が無効な場合、途中復元はできません。Excel 保存は利用できます。',
+                label: this.t(env.localStorageAvailable ? 'common.environment.storageYes' : 'common.environment.storageNo'),
+                detail: this.t('common.environment.storageDetail'),
             },
         ];
     },
@@ -494,7 +615,7 @@ const App = {
         const checks = this.getEnvironmentChecks();
         container.innerHTML = checks.map(check => `
             <li class="environment-check environment-check-${check.status}">
-                <span class="environment-status">${check.status === 'pass' ? 'OK' : (check.status === 'warn' ? '注意' : '不可')}</span>
+                <span class="environment-status">${this.t(check.status === 'pass' ? 'common.environment.statusPass' : (check.status === 'warn' ? 'common.environment.statusWarn' : 'common.environment.statusFail'))}</span>
                 <div class="environment-copy">
                     <strong>${check.label}</strong>
                     <span>${check.detail}</span>
@@ -580,18 +701,18 @@ const App = {
             ? (this.testRegistry[saved.selectedTests[saved.currentTestIndex]]
                 ? this.testRegistry[saved.selectedTests[saved.currentTestIndex]].name
                 : saved.selectedTests[saved.currentTestIndex])
-            : '完了済み';
-        const startedAt = new Date(saved.startTime).toLocaleString('ja-JP');
+            : this.t('common.saved.complete');
+        const startedAt = new Date(saved.startTime).toLocaleString(this.uiLanguage === 'ja' ? 'ja-JP' : 'en-US');
 
         container.innerHTML = `
             <div class="saved-session-copy">
-                <strong>前回のセッションが見つかりました</strong>
-                <span>${saved.participantName || '未入力'} / ${saved.participantId || 'IDなし'} / ${startedAt}</span>
-                <span>再開地点: ${currentTestName}</span>
+                <strong>${this.t('common.saved.found')}</strong>
+                <span>${saved.participantName || this.t('common.saved.unnamed')} / ${saved.participantId || this.t('common.saved.noId')} / ${startedAt}</span>
+                <span>${this.t('common.saved.resumePoint', { task: currentTestName })}</span>
             </div>
             <div class="saved-session-actions">
-                <button type="button" class="btn btn-secondary" id="btn-resume-session">復元する</button>
-                <button type="button" class="btn btn-primary" id="btn-discard-session">破棄する</button>
+                <button type="button" class="btn btn-secondary" id="btn-resume-session">${this.t('common.saved.resume')}</button>
+                <button type="button" class="btn btn-primary" id="btn-discard-session">${this.t('common.saved.discard')}</button>
             </div>
         `;
         container.classList.remove('hidden');
@@ -613,19 +734,88 @@ const App = {
     discardSavedSession() {
         localStorage.removeItem(this.STORAGE_KEY);
         this.renderSavedSessionBanner();
-        this.setStartError('');
+        this.clearStartError();
     },
 
     async restoreSavedSession() {
+        if (this.startTransitionInProgress || this.startTime) return false;
+        this.startTransitionInProgress = true;
+        const resumeButton = document.getElementById('btn-resume-session');
+        if (resumeButton) resumeButton.disabled = true;
+        try {
+            await this.restoreSavedSessionInternal();
+            return Boolean(this.startTime);
+        } finally {
+            if (!this.startTime) {
+                this.startTransitionInProgress = false;
+                if (resumeButton) resumeButton.disabled = false;
+            }
+        }
+    },
+
+    async restoreSavedSessionInternal() {
         const saved = this.getSavedSessionPayload();
         if (!saved) return;
+
+        const isVersionedSession = saved.sessionPayloadVersion === this.SESSION_PAYLOAD_VERSION;
+        if ((Number.isFinite(saved.sessionPayloadVersion) && saved.sessionPayloadVersion > this.SESSION_PAYLOAD_VERSION)
+            || (saved.studyConfig && !isVersionedSession)
+            || (isVersionedSession
+                && (saved.appVersion !== this.APP_VERSION
+                    || saved.protocolVersion !== this.PROTOCOL_VERSION))) {
+            this.setStartError(this.t('common.researcherConfig.validation.sessionVersion'));
+            return;
+        }
+
+        let restoredConfig;
+        try {
+            restoredConfig = await StudyConfig.restoreSessionConfig(saved);
+            const savedProtocolHash = saved.sessionProtocolMetadata?.study_config_hash;
+            if ((isVersionedSession && !savedProtocolHash)
+                || (savedProtocolHash && savedProtocolHash !== restoredConfig.config_hash)) {
+                throw new Error('integrity');
+            }
+
+            const savedLanguages = [
+                saved.ui_language || saved.quality?.ui_language,
+                saved.instruction_language || saved.quality?.instruction_language,
+                saved.stimulus_language || saved.quality?.stimulus_language,
+                saved.consent_language || saved.quality?.consent_language,
+            ];
+            if (isVersionedSession
+                && (savedLanguages.some(language => !['ja', 'en'].includes(language))
+                    || savedLanguages.some(language => language !== savedLanguages[0]))) {
+                throw new Error('integrity');
+            }
+            if (restoredConfig.language_policy === 'fixed'
+                && savedLanguages.some(language => language && language !== restoredConfig.participant_language)) {
+                throw new Error('integrity');
+            }
+        } catch (configError) {
+            console.error('Saved study configuration failed verification.', configError);
+            this.setStartError(this.t('common.researcherConfig.validation.integrity'));
+            return;
+        }
+
+        // A stored in-progress session owns its instruction/consent language.
+        // Query-string preferences apply only to a new session and must not
+        // silently change the wording under which consent was obtained.
+        const savedUiLanguage = saved.ui_language || saved.quality?.ui_language || 'ja';
+        this.setLanguage(savedUiLanguage, { force: true, resetConsent: false });
+        this.instructionLanguage = saved.instruction_language || saved.quality?.instruction_language || this.uiLanguage;
+        this.stimulusLanguage = saved.stimulus_language || saved.quality?.stimulus_language || this.uiLanguage;
+        this.consentLanguage = saved.consent_language || saved.quality?.consent_language || this.uiLanguage;
+        this.lockLanguage();
 
         this.participantName = saved.participantName || '';
         this.participantId = saved.participantId || '';
         this.participantAge = saved.participantAge || 0;
         this.viewingDistanceCm = saved.viewingDistanceCm != null ? saved.viewingDistanceCm : null;
         this.consentAccepted = Boolean(saved.consentAccepted);
-        this.selectedTests = saved.selectedTests || [];
+        this.sessionConsentVersion = saved.consent_version || saved.quality?.consent_version || this.getConsentVersion(this.consentLanguage);
+        this.selectedTests = this.resolvedTaskOrder.length > 0
+            ? this.resolvedTaskOrder.slice()
+            : (saved.selectedTests || []);
         this.currentTestIndex = saved.currentTestIndex || 0;
         this.results = saved.results || {};
         this.trialData = saved.trialData || {};
@@ -633,6 +823,15 @@ const App = {
         this.sessionStage = saved.sessionStage || 'test';
         this.inProgressTestId = saved.inProgressTestId || this.selectedTests[this.currentTestIndex] || null;
         this.quality = saved.quality || this.createQualityState();
+        Object.assign(this.quality, {
+            consent_version: this.getActiveConsentVersion(),
+            ui_language: this.uiLanguage,
+            instruction_language: this.instructionLanguage,
+            stimulus_language: this.stimulusLanguage,
+            consent_language: this.consentLanguage,
+            translation_version: saved.translation_version || saved.quality?.translation_version || I18n.TRANSLATION_VERSION,
+            ...StudyConfig.getMetadata(),
+        });
         this.quality.resumed_at_count = (this.quality.resumed_at_count || 0) + 1;
 
         const savedSeed = Number.isFinite(saved.randomSeed) ? saved.randomSeed : null;
@@ -648,6 +847,9 @@ const App = {
         this._sessionPerfStart = performance.now() - elapsedAtSave;
         this.sessionNumber = Number.isFinite(saved.sessionNumber) ? saved.sessionNumber : 1;
         this.counterbalanceGroup = Number.isFinite(saved.counterbalanceGroup) ? saved.counterbalanceGroup : null;
+        this.sessionProtocolMetadata = saved.sessionProtocolMetadata
+            || (saved.sessionPayloadVersion >= 3 ? saved.quality?.protocol : null)
+            || this.buildProtocolMetadata();
 
         this.applyParticipantFormValues();
         this.syncTestSelectionUi();
@@ -679,7 +881,7 @@ const App = {
     },
 
     syncTestSelectionUi() {
-        const allTests = ['flanker', 'dccs', 'list-sorting', 'pattern-comparison', 'picture-sequence'];
+        const allTests = this.ALL_TEST_IDS;
         const allChecked = allTests.every(testId => this.selectedTests.includes(testId));
         document.getElementById('select-all-tests').checked = allChecked;
         document.getElementById('individual-tests').classList.toggle('hidden', allChecked);
@@ -695,11 +897,11 @@ const App = {
         this.showScreen('screen-test');
         content.innerHTML = `
             <div class="instructions">
-                <h2>セッションを復元しました</h2>
-                <p>前回の途中状態を読み込みました。</p>
-                <p>現在の課題は「<strong>${testInfo ? testInfo.name : currentTest}</strong>」です。</p>
-                <p>この課題は最初から再開されます。完了済みの課題結果は保持されています。</p>
-                <button class="btn btn-primary" id="btn-resume-current-test">現在の課題を再開</button>
+                <h2>${this.t('common.saved.restoredHeading')}</h2>
+                <p>${this.t('common.saved.restored')}</p>
+                <p>${this.t('common.saved.currentTask', { task: testInfo ? testInfo.name : currentTest })}</p>
+                <p>${this.t('common.saved.restartTask')}</p>
+                <button class="btn btn-primary" id="btn-resume-current-test">${this.t('common.saved.restartButton')}</button>
             </div>
         `;
         document.getElementById('btn-resume-current-test').addEventListener('click', async () => {
@@ -739,6 +941,15 @@ const App = {
         errorEl.classList.remove('hidden');
     },
 
+    clearStartError() {
+        if (this.studyConfigErrorKey) {
+            this.studyConfigError = this.t(this.studyConfigErrorKey);
+            this.setStartError(this.studyConfigError);
+            return;
+        }
+        this.setStartError('');
+    },
+
     validateStartForm() {
         const participantId = document.getElementById('participant-id').value.trim();
         const age = parseInt(document.getElementById('participant-age').value, 10);
@@ -750,31 +961,55 @@ const App = {
         const consentEl = document.getElementById('consent-agree');
         const consent = consentEl ? consentEl.checked : false;
 
-        if (!consent) return '実施の説明を読み、同意チェックを入れてください。';
-        if (!participantId) return '参加者IDを入力してください。';
-        if (!age || age < 18 || age > 85) return '年齢を18〜85の範囲で入力してください。';
-        if (viewing != null && (isNaN(viewing) || viewing < 30 || viewing > 150)) return '画面までの距離は空欄、または 30〜150 cm の範囲で入力してください。';
-        if (selectedTests.length === 0) return '少なくとも1つのテストを選択してください。';
-        if (blockingChecks.length > 0) return `実施できない環境です: ${blockingChecks.map(check => check.label).join(' / ')}`;
-        if (!readinessComplete) return '実施前チェックの確認項目をすべて確認してください。';
+        if (this.studyConfigErrorKey) return this.t(this.studyConfigErrorKey);
+        if (this.studyConfigError) return this.studyConfigError;
+        if (!consent) return this.t('common.validation.consent');
+        if (!participantId) return this.t('common.validation.id');
+        if (!age || age < 18 || age > 85) return this.t('common.validation.age');
+        if (viewing != null && (isNaN(viewing) || viewing < 30 || viewing > 150)) return this.t('common.validation.distance');
+        if (selectedTests.length === 0) return this.t('common.validation.tests');
+        if (blockingChecks.length > 0) return this.t('common.validation.environment', { details: blockingChecks.map(check => check.label).join(' / ') });
+        if (!readinessComplete) return this.t('common.validation.readiness');
         return '';
     },
 
     getSelectedTestsFromUi() {
         const selectAll = document.getElementById('select-all-tests');
         if (selectAll.checked) {
-            return ['flanker', 'dccs', 'list-sorting', 'pattern-comparison', 'picture-sequence'];
+            return this.ALL_TEST_IDS.slice();
         }
         return Array.from(document.querySelectorAll('.test-checkbox:checked')).map(cb => cb.value);
     },
 
     async start() {
+        if (this.startTransitionInProgress || this.startTime) return false;
+        this.startTransitionInProgress = true;
+        const startButton = document.getElementById('btn-start');
+        if (startButton) startButton.disabled = true;
+        try {
+            await this.startInternal();
+            return Boolean(this.startTime);
+        } finally {
+            if (!this.startTime) {
+                this.startTransitionInProgress = false;
+                if (startButton) startButton.disabled = false;
+            }
+        }
+    },
+
+    async startInternal() {
         this.renderEnvironmentChecks();
         const error = this.validateStartForm();
         if (error) {
             this.setStartError(error);
             return;
         }
+
+        this.uiLanguage = I18n.getLocale();
+        this.instructionLanguage = this.uiLanguage;
+        this.stimulusLanguage = this.uiLanguage;
+        this.consentLanguage = this.uiLanguage;
+        this.sessionConsentVersion = this.getConsentVersion(this.consentLanguage);
 
         this.participantName = document.getElementById('participant-name').value.trim();
         this.participantId = document.getElementById('participant-id').value.trim();
@@ -787,18 +1022,27 @@ const App = {
         const privacyEl = document.getElementById('privacy-no-persist');
         this.privacyMode = privacyEl ? privacyEl.checked : false;
         if (this.privacyMode) {
-            try { localStorage.removeItem(this.STORAGE_KEY); } catch (e) { /* ignore */ }
+            try {
+                localStorage.removeItem(this.STORAGE_KEY);
+                localStorage.removeItem(this.HISTORY_STORAGE_KEY);
+            } catch (e) { /* ignore */ }
         }
 
-        const selectAllEl = document.getElementById('select-all-tests');
-        if (selectAllEl && selectAllEl.checked) {
-            const cb = this.counterbalanceOrderFor(this.participantId);
-            this.counterbalanceGroup = cb.group;
-            this.selectedTests = cb.order;
-        } else {
-            this.counterbalanceGroup = null;
-            this.selectedTests = this.getSelectedTestsFromUi();
+        try {
+            this.studyConfig = await StudyConfig.createSessionConfig();
+        } catch (configError) {
+            const message = configError?.message === 'hash_unavailable'
+                ? this.t('common.researcherConfig.validation.hashUnavailable')
+                : this.t('common.researcherConfig.validation.invalid');
+            this.setStartError(message);
+            return;
         }
+        this.studyConfigHash = this.studyConfig.config_hash;
+        const resolvedPlan = StudyConfig.resolveTaskOrder(this.studyConfig, this.participantId);
+        this.counterbalanceGroup = resolvedPlan.group;
+        this.selectedTests = resolvedPlan.order.slice();
+        this.resolvedTaskOrder = this.selectedTests.slice();
+        this.lockLanguage();
 
         this.currentTestIndex = 0;
         this.results = {};
@@ -826,23 +1070,34 @@ const App = {
         this.quality.session_number = this.sessionNumber;
         this.quality.counterbalance_group = this.counterbalanceGroup;
         this.quality.counterbalance_order = this.selectedTests.join(',');
-        this.quality.consent_version = this.CONSENT_VERSION;
+        this.quality.consent_version = this.getActiveConsentVersion();
+        this.quality.ui_language = this.uiLanguage;
+        this.quality.instruction_language = this.instructionLanguage;
+        this.quality.stimulus_language = this.stimulusLanguage;
+        this.quality.consent_language = this.consentLanguage;
+        this.quality.translation_version = I18n.TRANSLATION_VERSION;
         this.quality.privacy_mode = this.privacyMode ? 1 : 0;
-        this.quality.protocol = this.buildProtocolMetadata();
+        Object.assign(this.quality, StudyConfig.getMetadata());
+        this.sessionProtocolMetadata = this.buildProtocolMetadata();
+        this.quality.protocol = this.sessionProtocolMetadata;
         await this.captureDisplayTiming();
         this.logQualityEvent('session_started', {
             selectedTests: this.selectedTests.join(','),
             randomSeed: this.randomSeed,
+            uiLanguage: this.uiLanguage,
+            translationVersion: I18n.TRANSLATION_VERSION,
+            studyConfigId: this.studyConfig.config_id,
+            studyConfigHash: this.studyConfigHash,
         });
         this.persistSession();
 
         const content = this.getTestContent();
         this.showScreen('screen-test');
-        this.updateTestStatus('準備中');
+        this.updateTestStatus(this.t('common.status.preparing'));
         content.innerHTML = `
             <div class="instructions" role="status" aria-live="polite">
-                <h2>準備中</h2>
-                <p>刺激を読み込んでいます。数秒お待ちください。</p>
+                <h2>${this.t('common.loading.heading')}</h2>
+                <p>${this.t('common.loading.body')}</p>
             </div>
         `;
 
@@ -865,7 +1120,7 @@ const App = {
             testId,
         });
         this.persistSession();
-        this.updateTestStatus('課題準備');
+        this.updateTestStatus(this.t('common.status.taskPreparing'));
 
         if (testInfo.module && typeof testInfo.module.run === 'function') {
             testInfo.module.run();
@@ -875,10 +1130,10 @@ const App = {
         const content = this.getTestContent();
         content.innerHTML = `
             <div class="instructions">
-                <h2>読み込みエラー</h2>
-                <p>「${testInfo ? testInfo.name : testId}」を開始できませんでした。</p>
-                <p>ページを再読み込みするか、セッションを破棄して最初からやり直してください。</p>
-                <button class="btn btn-primary" id="btn-return-start">開始画面へ戻る</button>
+                <h2>${this.t('common.error.heading')}</h2>
+                <p>${this.t('common.error.task', { task: testInfo ? testInfo.name : testId })}</p>
+                <p>${this.t('common.error.recovery')}</p>
+                <button class="btn btn-primary" id="btn-return-start">${this.t('common.error.return')}</button>
             </div>
         `;
         document.getElementById('btn-return-start').addEventListener('click', () => this.restart());
@@ -914,15 +1169,15 @@ const App = {
         const nextTestInfo = this.testRegistry[nextTestId];
 
         this.clearPrimaryAdvanceBinding();
-        this.updateTestStatus('休憩');
+        this.updateTestStatus(this.t('common.status.break'));
 
         content.innerHTML = `
             <div class="instructions">
-                <h2>休憩</h2>
-                <p>${completed} / ${total} のテストが完了しました。</p>
-                <p>次は「<strong>${nextTestInfo.name}</strong>」（${nextTestInfo.domain}）です。</p>
-                <p>準備ができたら、下のボタンか <span class="key-hint">スペースキー</span> で進んでください。</p>
-                <button class="btn btn-primary" id="btn-break-next">次へ進む</button>
+                <h2>${this.t('common.breakScreen.heading')}</h2>
+                <p>${this.t('common.breakScreen.complete', { completed, total })}</p>
+                <p>${this.t('common.breakScreen.next', { task: nextTestInfo.name, domain: nextTestInfo.domain })}</p>
+                <p>${this.t('common.breakScreen.instruction')}</p>
+                <button class="btn btn-primary" id="btn-break-next">${this.t('common.breakScreen.nextButton')}</button>
             </div>
         `;
 
@@ -962,8 +1217,8 @@ const App = {
         const phaseEl = document.getElementById('test-status-phase');
         const fillEl = document.getElementById('test-status-progress-fill');
 
-        if (countEl) countEl.textContent = `課題 ${displayIndex} / ${total}`;
-        if (taskEl) taskEl.textContent = testInfo ? `${testInfo.name}（${testInfo.domain}）` : '';
+        if (countEl) countEl.textContent = this.t('common.status.taskCount', { current: displayIndex, total });
+        if (taskEl) taskEl.textContent = testInfo ? this.t('common.status.taskAndDomain', { task: testInfo.name, domain: testInfo.domain }) : '';
         if (phaseEl) phaseEl.textContent = phaseLabel;
         if (fillEl) fillEl.style.width = `${progress}%`;
     },
@@ -976,15 +1231,16 @@ const App = {
         const qualityFlags = this.buildQualityFlags();
         const qualityClass = qualityFlags.any_quality_flag ? 'quality-note quality-note-warn' : 'quality-note';
         const qualityMessage = qualityFlags.any_quality_flag
-            ? `研究者確認: ${qualityFlags.review_notes || '品質ログに確認候補があります。'}`
-            : '品質フラグは検出されませんでした。解析時には事前登録した基準に従って最終判断してください。';
+            ? this.t('common.resultScreen.review', { notes: qualityFlags.review_notes || this.t('common.resultScreen.reviewFallback') })
+            : this.t('common.resultScreen.clear');
 
         const participantLabel = this.participantName
             ? `${this.participantName} (${this.participantId})`
             : this.participantId;
-        const seedLabel = this.randomSeed != null ? `／ シード: ${this.randomSeed}` : '';
-        let html = `<p style="color:#888; margin-bottom:1em;">参加者: ${participantLabel} ／ 年齢: ${this.participantAge}歳 ／ ${this.startTime.toLocaleString('ja-JP')} ${seedLabel}</p>`;
-        html += '<table class="results-table"><thead><tr><th>テスト</th><th>認知ドメイン</th><th>スコア</th><th>詳細</th></tr></thead><tbody>';
+        const seedLabel = this.randomSeed != null ? this.t('common.resultScreen.seed', { seed: this.randomSeed }) : '';
+        const date = this.startTime.toLocaleString(this.uiLanguage === 'ja' ? 'ja-JP' : 'en-US');
+        let html = `<p style="color:#888; margin-bottom:1em;">${this.t('common.resultScreen.participant', { participant: participantLabel, age: this.participantAge, date, seed: seedLabel })}</p>`;
+        html += `<table class="results-table"><thead><tr><th>${this.t('common.resultScreen.test')}</th><th>${this.t('common.resultScreen.domain')}</th><th>${this.t('common.resultScreen.score')}</th><th>${this.t('common.resultScreen.detail')}</th></tr></thead><tbody>`;
 
         for (const testId of this.selectedTests) {
             const info = this.testRegistry[testId];
@@ -1000,18 +1256,18 @@ const App = {
         html += '</tbody></table>';
         html += `
             <div class="quality-summary">
-                <h2 class="panel-title">品質ログ</h2>
+                <h2 class="panel-title">${this.t('common.resultScreen.qualityHeading')}</h2>
                 <div class="quality-summary-grid">
-                    <div><strong>タブ離脱</strong><span>${quality.visibility_hidden_count}回</span></div>
-                    <div><strong>フォーカス離脱</strong><span>${quality.blur_count}回</span></div>
-                    <div><strong>フルスクリーン解除</strong><span>${quality.fullscreen_exit_count}回</span></div>
-                    <div><strong>画面サイズ変更</strong><span>${quality.resize_count}回</span></div>
-                    <div><strong>極端に速い反応</strong><span>${quality.fast_response_count}件</span></div>
-                    <div><strong>タイムアウト総数</strong><span>${quality.timeout_total}件</span></div>
+                    <div><strong>${this.t('common.resultScreen.tab')}</strong><span>${this.t('common.resultScreen.countTimes', { count: quality.visibility_hidden_count })}</span></div>
+                    <div><strong>${this.t('common.resultScreen.focus')}</strong><span>${this.t('common.resultScreen.countTimes', { count: quality.blur_count })}</span></div>
+                    <div><strong>${this.t('common.resultScreen.fullscreen')}</strong><span>${this.t('common.resultScreen.countTimes', { count: quality.fullscreen_exit_count })}</span></div>
+                    <div><strong>${this.t('common.resultScreen.resize')}</strong><span>${this.t('common.resultScreen.countTimes', { count: quality.resize_count })}</span></div>
+                    <div><strong>${this.t('common.resultScreen.fast')}</strong><span>${this.t('common.resultScreen.countItems', { count: quality.fast_response_count })}</span></div>
+                    <div><strong>${this.t('common.resultScreen.timeout')}</strong><span>${this.t('common.resultScreen.countItems', { count: quality.timeout_total })}</span></div>
                 </div>
                 <p class="${qualityClass}">${qualityMessage}</p>
-                <p class="download-note">QC は単一の除外判定ではなく、Excel の QC Multiverse に複数 universe として保存されます。</p>
-                <p class="download-note">研究者に提出するファイルは Excel 1 つです。下のボタンから保存してください。</p>
+                <p class="download-note">${this.t('common.resultScreen.qcNote')}</p>
+                <p class="download-note">${this.t('common.resultScreen.downloadNote')}</p>
             </div>
         `;
 
@@ -1047,15 +1303,24 @@ const App = {
     },
 
     getResponseTimeValues() {
-        return Object.values(this.trialData).flat().flatMap(trial => {
-            const values = [];
-            if (Number.isFinite(trial.rt)) values.push(trial.rt);
-            if (Number.isFinite(trial.responseTime)) values.push(trial.responseTime);
-            return values;
+        return Object.entries(this.trialData).flatMap(([testId, trials]) => {
+            // Untimed free recall in adaptive span tasks is not a speeded RT
+            // outcome and must not trigger generic fast/slow-response QC.
+            if (this.ADAPTIVE_SPAN_TEST_IDS.includes(testId)) return [];
+            return (trials || []).flatMap(trial => {
+                const values = [];
+                if (Number.isFinite(trial.rt)) values.push(trial.rt);
+                if (Number.isFinite(trial.responseTime)) values.push(trial.responseTime);
+                return values;
+            });
         });
     },
 
     buildProtocolMetadata() {
+        const studyMetadata = StudyConfig.getMetadata();
+        const randomizationMethod = studyMetadata.task_order_policy === 'fixed'
+            ? 'Researcher-configured fixed task order; within-task randomization uses mulberry32 with independently derived task seeds.'
+            : 'mulberry32 seedable PRNG with independently derived task seeds; Williams-design sessions use FNV-1a participant ID hash to choose one of 14 task orders.';
         return {
             app_version: this.APP_VERSION,
             protocol_version: this.PROTOCOL_VERSION,
@@ -1064,20 +1329,33 @@ const App = {
             stimulus_version: this.STIMULUS_VERSION,
             stimulus_rendering_mode: this.STIMULUS_RENDERING_MODE,
             qc_multiverse_version: this.QC_MULTIVERSE_VERSION,
-            consent_version: this.CONSENT_VERSION,
-            build_date: '2026-05-26',
-            intended_population: 'Japanese-speaking adults',
+            consent_version: this.getActiveConsentVersion(),
+            ui_language: this.uiLanguage,
+            instruction_language: this.instructionLanguage,
+            stimulus_language: this.stimulusLanguage,
+            consent_language: this.consentLanguage,
+            translation_version: I18n.TRANSLATION_VERSION,
+            ...studyMetadata,
+            build_date: '2026-07-17',
+            participant_population: 'Japanese- or English-speaking adults; language-dependent task forms require language-specific validation.',
+            intended_population: 'Japanese- or English-speaking adults; language-dependent task forms require language-specific validation.',
             intended_use: 'Remote within-sample research comparison; not a clinical or normative diagnostic instrument.',
             delivery_mode: 'Static browser app with local Excel workbook export for participant submission; optional JSON export is available for researcher diagnostics.',
-            timing_method: 'requestAnimationFrame stimulus onset plus KeyboardEvent.timeStamp/performance.now response timing.',
-            randomization_method: 'mulberry32 seedable PRNG; five-task sessions use FNV-1a participant ID hash to choose a 5x5 Latin-square row.',
+            timing_method: 'requestAnimationFrame-aligned stimulus onset/offset plus KeyboardEvent.timeStamp/performance.now response timing; span tasks retain per-item measured onsets and offsets.',
+            randomization_method: randomizationMethod,
+            adaptive_span_rule: 'Two scored trials per length (2-9); advance after at least one exact response and discontinue after two errors at the same length. Forward and backward scores remain separate.',
+            visual_digit_span_timing: 'Black digits 1-9 on white; 500 ms visible with 1000 ms stimulus-onset asynchrony.',
+            visual_digit_span_references: 'Ebaid & Crewther (2018), Frontiers in Aging Neuroscience 10:352; Kemtes & Allen (2008), Journal of Clinical and Experimental Neuropsychology 30(6):661-665.',
+            ecorsi_timing: 'Nine-block browser layout; 500 ms highlight with 1000 ms inter-onset interval.',
+            ecorsi_references: 'Brunetti et al. (2014), Frontiers in Psychology 5:939; Kessels et al. (2000), Applied Neuropsychology 7(4):252-258.',
+            stimulus_copyright_note: 'Digit and eCorsi forms are independently authored and versioned; proprietary WAIS items/norms and published standardized Corsi sequence lists are not reproduced.',
             qc_principle: 'Quality Control is exported as a multiverse/sensitivity-analysis factor, not as an automatic exclusion decision.',
         };
     },
 
     buildExportManifestRows({ protocolMetadata, qcMultiverseSummary, workbookSheets, exportedAt }) {
         const manifest = {
-            export_manifest_version: 'export-manifest-2026-05-v1',
+            export_manifest_version: 'export-manifest-2026-07-v4',
             export_format: 'xlsx',
             submission_instruction: 'Participant submits this single Excel workbook to the researcher.',
             exported_at: exportedAt,
@@ -1105,6 +1383,8 @@ const App = {
             case 'pattern-comparison': return this.computePatternComparisonMetrics(trials);
             case 'picture-sequence': return this.computePictureSequenceMetrics(trials);
             case 'list-sorting': return this.computeListSortingMetrics(trials);
+            case 'visual_digit_span': return this.computeAdaptiveSpanMetrics(trials, false);
+            case 'ecorsi': return this.computeAdaptiveSpanMetrics(trials, true);
             default: return {};
         }
     },
@@ -1115,6 +1395,10 @@ const App = {
             const result = this.results[testId] || {};
             const metrics = this.computeTaskMetricsForReview(testId);
             const label = this.testRegistry[testId] ? this.testRegistry[testId].name : testId;
+
+            // Error trials are intentionally generated by the staircase stopping
+            // rule, so their percentage is not comparable to fixed-trial accuracy.
+            if (this.ADAPTIVE_SPAN_TEST_IDS.includes(testId)) continue;
 
             if (Number.isFinite(result.accuracy)) {
                 signals.push({
@@ -1309,23 +1593,23 @@ const App = {
             if (condition && note) notes.push(note);
         };
 
-        addFlag('tab_hidden_flag', summary.visibility_hidden_count > 0, `タブ離脱 ${summary.visibility_hidden_count}回`);
-        addFlag('focus_loss_flag', summary.blur_count >= thresholds.focusLossCount, `フォーカス離脱 ${summary.blur_count}回`);
-        addFlag('fullscreen_exit_flag', summary.fullscreen_exit_count >= thresholds.fullscreenExitCount, `フルスクリーン解除 ${summary.fullscreen_exit_count}回`);
-        addFlag('resize_flag', summary.resize_count > 0, `画面サイズ変更 ${summary.resize_count}回`);
-        addFlag('many_timeouts_flag', summary.timeout_total >= thresholds.timeoutCount, `タイムアウト ${summary.timeout_total}件`);
-        addFlag('fast_response_flag', summary.fast_response_count >= thresholds.fastResponseCount, `極端に速い反応 ${summary.fast_response_count}件`);
-        addFlag('slow_response_flag', summary.slow_response_count >= thresholds.slowResponseCount, `極端に遅い反応 ${summary.slow_response_count}件`);
-        addFlag('long_task_flag', summary.long_task_count >= thresholds.longTaskCount, `long task ${summary.long_task_count}件`);
+        addFlag('tab_hidden_flag', summary.visibility_hidden_count > 0, this.t('common.qualityFlags.tab', { count: summary.visibility_hidden_count }));
+        addFlag('focus_loss_flag', summary.blur_count >= thresholds.focusLossCount, this.t('common.qualityFlags.focus', { count: summary.blur_count }));
+        addFlag('fullscreen_exit_flag', summary.fullscreen_exit_count >= thresholds.fullscreenExitCount, this.t('common.qualityFlags.fullscreen', { count: summary.fullscreen_exit_count }));
+        addFlag('resize_flag', summary.resize_count > 0, this.t('common.qualityFlags.resize', { count: summary.resize_count }));
+        addFlag('many_timeouts_flag', summary.timeout_total >= thresholds.timeoutCount, this.t('common.qualityFlags.timeout', { count: summary.timeout_total }));
+        addFlag('fast_response_flag', summary.fast_response_count >= thresholds.fastResponseCount, this.t('common.qualityFlags.fast', { count: summary.fast_response_count }));
+        addFlag('slow_response_flag', summary.slow_response_count >= thresholds.slowResponseCount, this.t('common.qualityFlags.slow', { count: summary.slow_response_count }));
+        addFlag('long_task_flag', summary.long_task_count >= thresholds.longTaskCount, this.t('common.qualityFlags.longTask', { count: summary.long_task_count }));
         addFlag(
             'small_viewport_flag',
             Number.isFinite(env.viewportWidth) && Number.isFinite(env.viewportHeight)
                 && (env.viewportWidth < this.MIN_VIEWPORT_WIDTH || env.viewportHeight < this.MIN_VIEWPORT_HEIGHT),
-            `表示領域 ${env.viewportWidth || '?'}x${env.viewportHeight || '?'}`
+            this.t('common.qualityFlags.viewport', { width: env.viewportWidth || '?', height: env.viewportHeight || '?' })
         );
-        addFlag('environment_block_flag', summary.block_count > 0, `環境ブロック ${summary.block_count}件`);
-        addFlag('environment_warning_flag', summary.warning_count > 0, `環境注意 ${summary.warning_count}件`);
-        addFlag('storage_unavailable_flag', env.localStorageAvailable === 0, 'localStorage 利用不可');
+        addFlag('environment_block_flag', summary.block_count > 0, this.t('common.qualityFlags.block', { count: summary.block_count }));
+        addFlag('environment_warning_flag', summary.warning_count > 0, this.t('common.qualityFlags.warning', { count: summary.warning_count }));
+        addFlag('storage_unavailable_flag', env.localStorageAvailable === 0, this.t('common.qualityFlags.storage'));
 
         const lowAccuracyItems = [];
         const practiceRepeatItems = [];
@@ -1333,6 +1617,10 @@ const App = {
             const result = this.results[testId] || {};
             const metrics = this.computeTaskMetricsForReview(testId);
             const label = this.testRegistry[testId] ? this.testRegistry[testId].name : testId;
+
+            if (this.ADAPTIVE_SPAN_TEST_IDS.includes(testId)) {
+                continue;
+            }
 
             if (Number.isFinite(result.accuracy)) {
                 const accuracyPercent = result.accuracy <= 1 ? result.accuracy * 100 : result.accuracy;
@@ -1360,12 +1648,12 @@ const App = {
             }
 
             if ((result.practiceAttempts || 0) >= thresholds.practiceAttempts) {
-                practiceRepeatItems.push(`${label} ${result.practiceAttempts}回`);
+                practiceRepeatItems.push(this.t('common.qualityFlags.practiceItem', { task: label, count: result.practiceAttempts }));
             }
         }
 
-        addFlag('low_accuracy_flag', lowAccuracyItems.length > 0, `低正答率: ${[...new Set(lowAccuracyItems)].join(', ')}`);
-        addFlag('practice_repeat_flag', practiceRepeatItems.length > 0, `練習反復: ${practiceRepeatItems.join(', ')}`);
+        addFlag('low_accuracy_flag', lowAccuracyItems.length > 0, this.t('common.qualityFlags.lowAccuracy', { items: [...new Set(lowAccuracyItems)].join(', ') }));
+        addFlag('practice_repeat_flag', practiceRepeatItems.length > 0, this.t('common.qualityFlags.practice', { items: practiceRepeatItems.join(', ') }));
 
         const flagKeys = Object.keys(flags).filter(key => key.endsWith('_flag'));
         const anyQualityFlag = flagKeys.some(key => flags[key] === 1) ? 1 : 0;
@@ -1378,7 +1666,7 @@ const App = {
     },
 
     buildResearcherReviewRows() {
-        const protocol = this.buildProtocolMetadata();
+        const protocol = this.sessionProtocolMetadata || this.buildProtocolMetadata();
         const qualitySummary = this.getQualitySummary();
         const qualityFlags = this.buildQualityFlags();
         const qcMultiverseRows = this.buildQcMultiverseRows();
@@ -1409,6 +1697,11 @@ const App = {
             row[`${prefix}_timeout_count`] = result.timeoutCount != null ? result.timeoutCount : null;
             row[`${prefix}_stimulus_set_id`] = result.setId || null;
             row[`${prefix}_stimulus_theme`] = result.theme || null;
+            row[`${prefix}_stimulus_form`] = result.stimulus_form || null;
+            row[`${prefix}_task_seed`] = result.task_seed != null ? result.task_seed : null;
+            row[`${prefix}_condition_order`] = result.condition_order || null;
+            row[`${prefix}_forward_span`] = result.forward_span != null ? result.forward_span : null;
+            row[`${prefix}_backward_span`] = result.backward_span != null ? result.backward_span : null;
         }
 
         return [row];
@@ -1627,21 +1920,121 @@ const App = {
         };
     },
 
+    _parseNumberArray(value) {
+        if (Array.isArray(value)) {
+            return value.map(Number).filter(Number.isFinite);
+        }
+        if (typeof value !== 'string' || value.trim() === '') return [];
+        try {
+            const parsed = JSON.parse(value);
+            if (Array.isArray(parsed)) return parsed.map(Number).filter(Number.isFinite);
+        } catch (error) {
+            // Excel-friendly delimited values are handled below.
+        }
+        return value.split(/[;,|]/).map(part => Number(part.trim())).filter(Number.isFinite);
+    },
+
+    computeAdaptiveSpanMetrics(trials, includeTapLatency = false) {
+        if (!trials || trials.length === 0) return {};
+
+        const isPractice = trial => trial.practice === true
+            || trial.practice === 1
+            || trial.isPractice === true
+            || trial.is_practice === 1
+            || String(trial.phase || '').toLowerCase() === 'practice'
+            || String(trial.trialType || trial.trial_type || '').toLowerCase() === 'practice';
+        const scoredTrials = trials.filter(trial => !isPractice(trial));
+        const conditionOf = trial => String(trial.condition || trial.direction || '').toLowerCase();
+        const lengthOf = trial => {
+            const value = trial.setSize ?? trial.set_size ?? trial.length ?? trial.sequenceLength ?? trial.sequence_length;
+            return Number.isFinite(Number(value)) ? Number(value) : null;
+        };
+        const correctOf = trial => Number(trial.exactCorrect ?? trial.exact_correct ?? trial.correct ?? 0) === 1;
+        const valueOf = (trial, keys) => {
+            for (const key of keys) {
+                const value = Number(trial[key]);
+                if (Number.isFinite(value)) return value;
+            }
+            return null;
+        };
+        const summarizeCondition = condition => {
+            const rows = scoredTrials.filter(trial => conditionOf(trial) === condition);
+            const correctRows = rows.filter(correctOf);
+            const correctLengths = correctRows.map(lengthOf).filter(Number.isFinite);
+            const span = correctLengths.length > 0 ? Math.max(...correctLengths) : 0;
+            const recallDurations = rows
+                .map(trial => valueOf(trial, ['recallDurationMs', 'recall_duration_ms', 'responseTime']))
+                .filter(Number.isFinite);
+            const firstTapLatencies = rows
+                .map(trial => valueOf(trial, ['firstTapLatencyMs', 'first_tap_latency_ms']))
+                .filter(Number.isFinite);
+            const prefix = condition;
+            const summary = {
+                [`${prefix}_trials_n`]: rows.length,
+                [`${prefix}_correct_trials`]: correctRows.length,
+                [`${prefix}_exact_response_percent`]: rows.length > 0
+                    ? parseFloat((correctRows.length / rows.length * 100).toFixed(1))
+                    : null,
+                [`${prefix}_span`]: span,
+                [`${prefix}_span_x_correct_trials`]: span * correctRows.length,
+                [`${prefix}_mean_recall_duration_ms`]: recallDurations.length > 0
+                    ? Math.round(this._mean(recallDurations))
+                    : null,
+            };
+            if (includeTapLatency) {
+                summary[`${prefix}_mean_first_tap_latency_ms`] = firstTapLatencies.length > 0
+                    ? Math.round(this._mean(firstTapLatencies))
+                    : null;
+            }
+            return summary;
+        };
+
+        const visibleDurations = [];
+        const onsetIntervals = [];
+        for (const trial of trials) {
+            const onsets = this._parseNumberArray(
+                trial.itemOnsetsMs ?? trial.item_onsets_ms ?? trial.stimulusOnsetsMs ?? trial.stimulus_onsets_ms
+            );
+            const offsets = this._parseNumberArray(
+                trial.itemOffsetsMs ?? trial.item_offsets_ms ?? trial.stimulusOffsetsMs ?? trial.stimulus_offsets_ms
+            );
+            for (let i = 0; i < Math.min(onsets.length, offsets.length); i++) {
+                if (offsets[i] >= onsets[i]) visibleDurations.push(offsets[i] - onsets[i]);
+            }
+            for (let i = 1; i < onsets.length; i++) {
+                if (onsets[i] >= onsets[i - 1]) onsetIntervals.push(onsets[i] - onsets[i - 1]);
+            }
+        }
+
+        return {
+            ...summarizeCondition('forward'),
+            ...summarizeCondition('backward'),
+            scored_trials_n: scoredTrials.length,
+            practice_trials_n: trials.length - scoredTrials.length,
+            observed_item_visible_ms_mean: visibleDurations.length > 0
+                ? Math.round(this._mean(visibleDurations))
+                : null,
+            observed_item_soa_ms_mean: onsetIntervals.length > 0
+                ? Math.round(this._mean(onsetIntervals))
+                : null,
+        };
+    },
+
     // ==================== Excel Export ====================
 
     downloadExcel() {
         if (typeof XLSX === 'undefined') {
-            alert('Excel ライブラリを読み込めませんでした。ページを再読み込みしてから、もう一度試してください。');
+            alert(this.t('common.alerts.xlsxMissing'));
             return;
         }
         if (!this.startTime) {
-            alert('保存できるセッションがありません。');
+            alert(this.t('common.alerts.noSession'));
             return;
         }
 
         const qualitySummary = this.getQualitySummary();
         const qualityFlags = this.buildQualityFlags();
-        const protocolMetadata = this.buildProtocolMetadata();
+        const protocolMetadata = this.sessionProtocolMetadata || this.buildProtocolMetadata();
         const researcherReviewRows = this.buildResearcherReviewRows();
         const qcMultiverseRows = this.buildQcMultiverseRows();
         const qcMultiverseSummary = this.summarizeQcMultiverseRows(qcMultiverseRows);
@@ -1656,7 +2049,7 @@ const App = {
             consent_accepted: this.consentAccepted ? 1 : 0,
             random_seed: this.randomSeed,
             date: this.startTime.toISOString(),
-            date_local: this.startTime.toLocaleString('ja-JP'),
+            date_local: this.startTime.toLocaleString(this.uiLanguage === 'ja' ? 'ja-JP' : 'en-US'),
             browser: this.quality.environment.browser,
             user_agent: this.quality.environment.userAgent,
             platform: this.quality.environment.platform,
@@ -1682,7 +2075,13 @@ const App = {
             session_number: this.sessionNumber,
             counterbalance_group: this.counterbalanceGroup,
             counterbalance_order: this.selectedTests.join(','),
-            consent_version: this.CONSENT_VERSION,
+            ...StudyConfig.getMetadata(),
+            consent_version: this.getActiveConsentVersion(),
+            ui_language: this.uiLanguage,
+            instruction_language: this.instructionLanguage,
+            stimulus_language: this.stimulusLanguage,
+            consent_language: this.consentLanguage,
+            translation_version: I18n.TRANSLATION_VERSION,
             privacy_mode: this.privacyMode ? 1 : 0,
             grayscale_confirmed: this.quality.grayscale_confirmed != null ? this.quality.grayscale_confirmed : null,
             long_task_count: this.quality.long_task_count || 0,
@@ -1720,6 +2119,9 @@ const App = {
                 accScore: result.accScore != null ? result.accScore : null,
                 rtScore: result.rtScore != null ? result.rtScore : null,
                 timeoutCount: result.timeoutCount != null ? result.timeoutCount : null,
+                forward_span: result.forward_span != null ? result.forward_span : null,
+                backward_span: result.backward_span != null ? result.backward_span : null,
+                stimulus_form: result.stimulus_form || null,
             });
         }
 
@@ -1742,6 +2144,7 @@ const App = {
             'Research Metrics',
             'Task Metrics Long',
             'Protocol Metadata',
+            'Study Configuration',
             'Researcher Review',
             'QC Multiverse',
             'Session Quality',
@@ -1766,6 +2169,7 @@ const App = {
             field,
             value,
         }))), 'Protocol Metadata');
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(StudyConfig.buildRows()), 'Study Configuration');
         XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(researcherReviewRows), 'Researcher Review');
         XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(qcMultiverseRows), 'QC Multiverse');
         XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet([{
@@ -1806,7 +2210,7 @@ const App = {
             XLSX.writeFile(wb, `cognitive_battery_${prefix}.xlsx`);
         } catch (error) {
             console.error('Failed to save workbook.', error);
-            alert('Excel の保存に失敗しました。参加者IDに使えない記号が入っていないか確認してください。');
+            alert(this.t('common.alerts.excelFailed'));
         }
     },
 
@@ -1818,10 +2222,19 @@ const App = {
             { sheet: 'Participant', field: 'viewing_distance_cm', unit: 'cm', description: '自己申告の目と画面中央までの距離（視覚度換算の参考値）' },
             { sheet: 'Participant', field: 'consent_accepted', unit: '1/0', description: '同意チェックの受諾状態' },
             { sheet: 'Participant', field: 'random_seed', unit: '-', description: 'mulberry32 に与えた試行順シード（32bit 符号なし整数）。再現実行に使用可能' },
-            { sheet: 'Participant', field: 'session_number', unit: '-', description: '同じ参加者 ID での累積セッション数（同じ端末の localStorage で管理）' },
-            { sheet: 'Participant', field: 'counterbalance_group', unit: '-', description: '5×5 Latin square の行番号（0-4）。参加者 ID の FNV-1a ハッシュ mod 5 で決定。全課題選択時のみ適用' },
+            { sheet: 'Participant', field: 'session_number', unit: '-', description: '同じ研究設定ハッシュ＋参加者 ID での累積セッション数（同じ端末の localStorage で管理）。プライバシーモードでは保存しない' },
+            { sheet: 'Participant', field: 'counterbalance_group', unit: '-', description: '7課題 Williams design の順序番号（0-13）。参加者 ID の FNV-1a ハッシュ mod 14 で決定。全課題選択時のみ適用' },
             { sheet: 'Participant', field: 'counterbalance_order', unit: '-', description: 'この参加者に割り当てられた実施順（カンマ区切り）' },
+            { sheet: 'Participant / Protocol Metadata / Export Manifest / Study Configuration', field: 'study_config_id / study_config_hash', unit: '-', description: '研究設定の識別子と、正規化設定JSONに対するSHA-256ハッシュ' },
+            { sheet: 'Participant / Protocol Metadata / Export Manifest / Study Configuration', field: 'study_config_schema_version / protocol_preset', unit: '-', description: '研究設定スキーマと先行研究参照・固定プロトコルプリセットの版' },
+            { sheet: 'Study Configuration', field: 'configured_tasks / task_order_policy / fixed_order / resolved_task_order', unit: '-', description: '設定した課題、順序方式、固定順、および当該参加者に実際に割り当てられた順序' },
+            { sheet: 'Study Configuration', field: 'participant_language_default / language_policy', unit: '-', description: '既定言語と、研究者固定または参加者選択可の言語ポリシー' },
             { sheet: 'Participant', field: 'consent_version', unit: '-', description: '同意画面のバージョン文字列（文言変更のトラッキング用）' },
+            { sheet: 'Participant / Protocol Metadata / Export Manifest', field: 'ui_language', unit: 'BCP 47', description: '参加者画面の表示言語（ja または en）' },
+            { sheet: 'Participant / Protocol Metadata / Export Manifest', field: 'instruction_language', unit: 'BCP 47', description: '課題教示に使用した言語（ja または en）' },
+            { sheet: 'Participant / Protocol Metadata / Export Manifest', field: 'stimulus_language', unit: 'BCP 47', description: '言語依存刺激に使用した言語（ja または en）' },
+            { sheet: 'Participant / Protocol Metadata / Export Manifest', field: 'consent_language', unit: 'BCP 47', description: '同意取得時に表示した言語（ja または en）' },
+            { sheet: 'Participant / Protocol Metadata / Export Manifest', field: 'translation_version', unit: '-', description: '日英翻訳辞書の版数' },
             { sheet: 'Participant', field: 'privacy_mode', unit: '1/0', description: '共有 PC 向け「この端末に保存しない」モードが有効かどうか。1 の場合 localStorage への書き込みが抑止される' },
             { sheet: 'Participant', field: 'grayscale_confirmed', unit: '1/0', description: '開始前に 8 段階グレースケールがすべて区別できることを自己申告した' },
             { sheet: 'Participant', field: 'long_task_count', unit: '件', description: 'テスト中に発生した PerformanceObserver longtask の件数（50ms 超の長タスク）' },
@@ -1844,7 +2257,7 @@ const App = {
             { sheet: 'Participant', field: 'saa_rt_sd_multiplier', unit: '-', description: 'SAA RT の外れ値除外における SD 乗数' },
             { sheet: 'Participant', field: 'app_version', unit: '-', description: 'アプリのビルド識別子' },
             { sheet: 'Participant', field: 'protocol_version / task_version / scoring_version / stimulus_version', unit: '-', description: 'プロトコル、課題、採点、刺激プールの版数' },
-            { sheet: 'Participant', field: 'stimulus_rendering_mode', unit: '-', description: '刺激レンダリング方式。system-emoji は OS の絵文字フォントを使用することを示す' },
+            { sheet: 'Participant', field: 'stimulus_rendering_mode', unit: '-', description: '刺激レンダリング方式。絵文字に加えてHTMLテキスト数字と幾何学ブロックを使用' },
             { sheet: 'Participant', field: 'qc_multiverse_version', unit: '-', description: 'QC multiverse 定義の版数' },
             { sheet: 'Participant', field: 'qc_universe_count / qc_exclude_candidate_count', unit: '-', description: '出力に含まれる QC universe 数と除外候補 universe 数' },
             { sheet: 'Participant', field: 'qc_exclude_candidate_universes', unit: '-', description: 'この参加者が除外候補となる QC universe ID（カンマ区切り）' },
@@ -1863,19 +2276,25 @@ const App = {
             { sheet: 'Protocol Metadata', field: 'stimulus_version', unit: '-', description: '刺激プールの版数' },
             { sheet: 'Protocol Metadata', field: 'qc_multiverse_version', unit: '-', description: 'QC multiverse 定義の版数' },
             { sheet: 'Protocol Metadata', field: 'timing_method', unit: '-', description: 'RT 計測手続きの概要' },
+            { sheet: 'Protocol Metadata', field: 'adaptive_span_rule', unit: '-', description: 'Visual Digit Span / eCorsi の開始長、進行・中止規則' },
+            { sheet: 'Protocol Metadata', field: 'visual_digit_span_timing / ecorsi_timing', unit: '-', description: '各スパン課題の目標提示時間と SOA' },
+            { sheet: 'Protocol Metadata', field: 'visual_digit_span_references / ecorsi_references', unit: '-', description: '課題手続きの根拠とした先行研究' },
+            { sheet: 'Protocol Metadata', field: 'stimulus_copyright_note', unit: '-', description: '独自刺激であり、保護された検査項目・規準を複製しない旨' },
             { sheet: 'Protocol Metadata', field: 'qc_principle', unit: '-', description: 'QC を自動除外ではなく multiverse / sensitivity analysis の研究者自由度として扱う方針' },
 
-            { sheet: 'Scores', field: 'score', unit: '-', description: '課題別の表示スコア（SAA=正答率得点+RT得点、Pattern Comparison=正答数、List Sorting=合計点、Picture Sequence=累積隣接ペア数）' },
+            { sheet: 'Scores', field: 'score', unit: '-', description: '課題別の表示スコア。スパン課題では Forward/Backward span の単純合計を表示するが、解析では条件別 span を使用する' },
             { sheet: 'Scores', field: 'accuracy', unit: '%', description: '正答率' },
             { sheet: 'Scores', field: 'accScore', unit: '-', description: 'SAA の正答率由来スコア成分' },
             { sheet: 'Scores', field: 'rtScore', unit: '-', description: 'SAA の RT 由来スコア成分（正答率 >0.8 のみ算出）' },
             { sheet: 'Scores', field: 'timeoutCount', unit: '件', description: 'その課題でのタイムアウト試行数' },
+            { sheet: 'Scores', field: 'forward_span / backward_span', unit: '項目数', description: '適応的スパン課題の条件別最長完全正答系列' },
+            { sheet: 'Scores', field: 'stimulus_form', unit: '-', description: 'スパン課題で割り当てた独立刺激フォーム' },
 
             { sheet: 'Researcher Review', field: 'review_recommendation', unit: 'ok/review', description: '品質ログから研究者確認を推奨するかどうか。自動除外ではない' },
             { sheet: 'Researcher Review', field: 'review_notes', unit: '-', description: '確認候補になった品質ログの要約' },
             { sheet: 'Researcher Review', field: '*_flag', unit: '1/0', description: '低正答率、タブ離脱、フォーカス離脱、タイムアウト、極端 RT、環境警告などの確認フラグ' },
             { sheet: 'Researcher Review', field: 'qc_include_candidate_universes / qc_exclude_candidate_universes', unit: '-', description: 'QC multiverse の各 universe で、この参加者が含入候補または除外候補になる universe ID' },
-            { sheet: 'Researcher Review', field: '<test>_stimulus_set_id / stimulus_theme', unit: '-', description: 'DCCS のカードセット ID や Picture Sequence のテーマなど、刺激条件の識別子' },
+            { sheet: 'Researcher Review', field: '<test>_stimulus_set_id / stimulus_theme / stimulus_form', unit: '-', description: 'DCCS のカードセット ID、Picture Sequence のテーマ、スパン課題のフォームなど刺激条件の識別子' },
 
             { sheet: 'QC Multiverse', field: 'universe_id', unit: '-', description: 'QC universe の識別子。解析時の感度分析要因として使用' },
             { sheet: 'QC Multiverse', field: 'analysis_role', unit: '-', description: '記述統計、最小 QC、behavioral QC、strict QC など、この universe の解析上の役割' },
@@ -1892,6 +2311,10 @@ const App = {
             { sheet: 'Research Metrics', field: 'pattern_comparison_d_prime', unit: '-', description: "Signal Detection Theory の感度指標 d'（zHit - zFA）" },
             { sheet: 'Research Metrics', field: 'pattern_comparison_criterion_c', unit: '-', description: '反応バイアス c = -0.5 × (zHit + zFA)' },
             { sheet: 'Research Metrics', field: 'picture_sequence_learning_slope', unit: 'ペア/試行', description: '3学習試行での隣接ペア数の平均変化率' },
+            { sheet: 'Research Metrics', field: 'visual_digit_span_forward_span / backward_span', unit: '桁', description: '各条件で完全正答した最長系列。視覚提示のため聴覚版の規準値を流用しない' },
+            { sheet: 'Research Metrics', field: 'ecorsi_forward_span / backward_span', unit: 'ブロック', description: '各条件で完全正答した最長系列' },
+            { sheet: 'Research Metrics', field: '<span>_span_x_correct_trials', unit: 'score', description: 'span × 中止までの完全正答試行数。Kessels et al. の Total Score 型指標。条件別に保持' },
+            { sheet: 'Research Metrics', field: '<span>_observed_item_visible_ms_mean / observed_item_soa_ms_mean', unit: 'ms', description: '実測した刺激の平均点灯時間と平均 SOA（提示品質確認用）' },
             { sheet: 'Research Metrics', field: '<test>_practice_attempts', unit: '回', description: '本番到達までの練習試行セット数' },
             { sheet: 'Research Metrics', field: '<test>_test_duration_ms', unit: 'ms', description: '課題の本番所要時間' },
             { sheet: 'Research Metrics', field: '<test>_timeout_count', unit: '件', description: '本番でのタイムアウト試行数' },
@@ -1904,7 +2327,7 @@ const App = {
             { sheet: 'Task Metrics Long', field: 'unit', unit: '-', description: 'メトリクス単位（ms, %, count, score など）' },
             { sheet: 'Task Metrics Long', field: 'value / value_numeric / value_text', unit: '-', description: '解析しやすいよう、元値・数値化した値・文字列値を分離' },
 
-            { sheet: '*_raw', field: 'trialNum', unit: '-', description: '課題内試行番号（1 起点）' },
+            { sheet: '*_raw', field: 'trialNum / trial_number', unit: '-', description: '課題内試行番号（1 起点）' },
             { sheet: '*_raw', field: 'rt', unit: 'ms', description: '反応時間。刺激呈示フレーム（requestAnimationFrame 同期）からキー押下までの performance.now() 差' },
             { sheet: '*_raw', field: 'tOnset', unit: 'ms', description: 'セッション開始時点からの刺激呈示時刻' },
             { sheet: '*_raw', field: 'tResponse', unit: 'ms', description: 'セッション開始時点からの反応時刻' },
@@ -1919,8 +2342,19 @@ const App = {
             { sheet: 'list_sorting_raw', field: 'phase', unit: '-', description: 'single = 1リスト条件、dual = 2リスト条件' },
             { sheet: 'list_sorting_raw', field: 'length', unit: '-', description: '提示アイテム数' },
             { sheet: 'list_sorting_raw', field: 'attempt', unit: '-', description: '当該長での試行回数（1 または 2）' },
+            { sheet: 'list_sorting_raw', field: 'itemIds / correctOrderIds / responseIds', unit: '-', description: '表示言語に依存しない項目 ID、正答順 ID、回答順 ID（セミコロン区切り）' },
             { sheet: 'picture_sequence_raw', field: 'adjacentPairs', unit: '-', description: '正しく隣接する順序で並べられたペア数' },
             { sheet: 'picture_sequence_raw', field: 'maxPairs', unit: '-', description: '最大隣接ペア数 = sequenceLength - 1' },
+            { sheet: 'picture_sequence_raw', field: 'itemIds / correctOrderIds / responseOrderIds', unit: '-', description: '表示言語に依存しない提示項目 ID、正答順 ID、回答順 ID（セミコロン区切り）' },
+            { sheet: 'list_sorting_raw / picture_sequence_raw', field: 'stimulus_language', unit: 'BCP 47', description: 'その試行で使用した言語依存刺激の言語（ja または en）' },
+            { sheet: 'list_sorting_raw / picture_sequence_raw', field: 'stimulus_bank_version', unit: '-', description: '言語依存刺激バンクの版数' },
+            { sheet: 'visual_digit_span_raw / ecorsi_raw', field: 'condition / set_size / attempt', unit: '-', description: 'Forward/Backward、系列長、当該系列長での試行番号' },
+            { sheet: 'visual_digit_span_raw / ecorsi_raw', field: 'presented_sequence / expected_sequence / response_sequence', unit: '-', description: '提示系列、採点対象系列（Backward は逆順）、参加者回答' },
+            { sheet: 'visual_digit_span_raw / ecorsi_raw', field: 'exact_correct', unit: '1/0', description: '系列全体および順序が完全一致したか' },
+            { sheet: 'visual_digit_span_raw / ecorsi_raw', field: 'item_onsets_ms / item_offsets_ms', unit: 'ms', description: '各刺激についてセッション開始からの実測点灯・消灯時刻' },
+            { sheet: 'visual_digit_span_raw / ecorsi_raw', field: 'recall_duration_ms', unit: 'ms', description: '回答画面表示から確定までの時間。速度得点・汎用 RT QC には使用しない' },
+            { sheet: 'visual_digit_span_raw', field: 'first_input_latency_ms / input_methods', unit: 'ms / -', description: '最初の数字入力までの時間と利用した入力方法' },
+            { sheet: 'ecorsi_raw', field: 'first_tap_latency_ms / input_method', unit: 'ms / -', description: '回答開始までの時間と入力方法（pointer/keyboard/mixed）' },
 
             { sheet: 'Session Quality', field: 'visibility_hidden_count', unit: '回', description: 'タブが非可視になった回数（visibilitychange）' },
             { sheet: 'Session Quality', field: 'blur_count', unit: '回', description: 'ウィンドウフォーカスが外れた回数' },
@@ -1945,7 +2379,7 @@ const App = {
 
     async downloadJson() {
         if (!this.startTime) {
-            alert('保存できるセッションがありません。');
+            alert(this.t('common.alerts.noSession'));
             return;
         }
 
@@ -1966,20 +2400,26 @@ const App = {
     },
 
     async buildJsonPayload() {
-        const protocol = this.buildProtocolMetadata();
+        const protocol = this.sessionProtocolMetadata || this.buildProtocolMetadata();
         const qualityFlags = this.buildQualityFlags();
         const qcMultiverseRows = this.buildQcMultiverseRows();
         const payload = {
             version: this.APP_VERSION,
             exported_at: new Date().toISOString(),
             protocol,
+            study_configuration: StudyConfig.publicSessionConfiguration(),
             participant: {
                 participantName: this.participantName || null,
                 participantId: this.participantId,
                 age: this.participantAge,
                 viewing_distance_cm: this.viewingDistanceCm,
                 consent_accepted: this.consentAccepted,
-                consent_version: this.CONSENT_VERSION,
+                consent_version: this.getActiveConsentVersion(),
+                ui_language: this.uiLanguage,
+                instruction_language: this.instructionLanguage,
+                stimulus_language: this.stimulusLanguage,
+                consent_language: this.consentLanguage,
+                translation_version: I18n.TRANSLATION_VERSION,
                 privacy_mode: this.privacyMode,
                 random_seed: this.randomSeed,
                 session_number: this.sessionNumber,
@@ -2030,7 +2470,8 @@ const App = {
             || key.includes('_rt_')
             || key.endsWith('_rt')
             || key === 'rt') return 'ms';
-        if (key.includes('accuracy')) return '%';
+        if (key.includes('accuracy') || key.includes('percent')) return '%';
+        if (key.includes('span_x')) return 'score';
         if (key.includes('score')) return 'score';
         if (key.includes('learning_slope')) return 'pairs/trial';
         if (key.includes('proportion')
@@ -2083,6 +2524,25 @@ const App = {
             testDurationMs: 'test_duration_ms',
             setId: 'stimulus_set_id',
             theme: 'stimulus_theme',
+            forward_span: 'forward_span',
+            backward_span: 'backward_span',
+            combined_span: 'combined_span',
+            forward_correct_trials: 'forward_correct_trials',
+            backward_correct_trials: 'backward_correct_trials',
+            forward_administered_trials: 'forward_administered_trials',
+            backward_administered_trials: 'backward_administered_trials',
+            forward_span_x_correct_trials: 'forward_span_x_correct_trials',
+            backward_span_x_correct_trials: 'backward_span_x_correct_trials',
+            forward_stop_length: 'forward_stop_length',
+            backward_stop_length: 'backward_stop_length',
+            total_scored_trials: 'total_scored_trials',
+            practice_trial_count: 'practice_trial_count',
+            stimulus_form: 'stimulus_form',
+            stimulus_version: 'task_stimulus_version',
+            task_version: 'task_implementation_version',
+            scoring_version: 'task_scoring_version',
+            task_seed: 'task_seed',
+            condition_order: 'condition_order',
         };
 
         const pushRow = (testId, metric, metricSource, value) => {
@@ -2135,6 +2595,8 @@ const App = {
                 case 'pattern-comparison': metrics = this.computePatternComparisonMetrics(trials); break;
                 case 'picture-sequence': metrics = this.computePictureSequenceMetrics(trials); break;
                 case 'list-sorting': metrics = this.computeListSortingMetrics(trials); break;
+                case 'visual_digit_span': metrics = this.computeAdaptiveSpanMetrics(trials, false); break;
+                case 'ecorsi': metrics = this.computeAdaptiveSpanMetrics(trials, true); break;
             }
             const prefix = testId.replace(/-/g, '_');
             for (const [key, value] of Object.entries(metrics)) {
@@ -2145,6 +2607,9 @@ const App = {
             if (result.timeoutCount != null) wideRow[`${prefix}_timeout_count`] = result.timeoutCount;
             if (result.setId != null) wideRow[`${prefix}_stimulus_set_id`] = result.setId;
             if (result.theme != null) wideRow[`${prefix}_stimulus_theme`] = result.theme;
+            if (result.stimulus_form != null) wideRow[`${prefix}_stimulus_form`] = result.stimulus_form;
+            if (result.task_seed != null) wideRow[`${prefix}_task_seed`] = result.task_seed;
+            if (result.condition_order != null) wideRow[`${prefix}_condition_order`] = result.condition_order;
         }
         return wideRow;
     },
@@ -2160,12 +2625,22 @@ const App = {
             return;
         }
 
+        const hasVersionedStudyConfig = Boolean(this.studyConfig && this.studyConfigHash);
         const payload = {
+            sessionPayloadVersion: hasVersionedStudyConfig ? this.SESSION_PAYLOAD_VERSION : 2,
+            appVersion: this.APP_VERSION,
+            protocolVersion: this.PROTOCOL_VERSION,
             participantName: this.participantName,
             participantId: this.participantId,
             participantAge: this.participantAge,
             viewingDistanceCm: this.viewingDistanceCm,
             consentAccepted: this.consentAccepted,
+            consent_version: this.getActiveConsentVersion(),
+            ui_language: this.uiLanguage,
+            instruction_language: this.instructionLanguage,
+            stimulus_language: this.stimulusLanguage,
+            consent_language: this.consentLanguage,
+            translation_version: I18n.TRANSLATION_VERSION,
             selectedTests: this.selectedTests,
             currentTestIndex: this.currentTestIndex,
             results: this.results,
@@ -2179,6 +2654,10 @@ const App = {
             sessionElapsedMsAtSave: this.sessionElapsedMs(),
             sessionNumber: this.sessionNumber,
             counterbalanceGroup: this.counterbalanceGroup,
+            studyConfig: this.studyConfig,
+            studyConfigHash: this.studyConfigHash,
+            resolvedTaskOrder: this.resolvedTaskOrder,
+            sessionProtocolMetadata: this.sessionProtocolMetadata,
         };
 
         try {
@@ -2190,15 +2669,22 @@ const App = {
 
     restart() {
         this.clearPrimaryAdvanceBinding();
+        this.unlockLanguage();
 
         this.participantName = '';
         this.participantId = '';
         this.participantAge = 0;
         this.viewingDistanceCm = null;
         this.consentAccepted = false;
+        this.sessionConsentVersion = null;
         this.privacyMode = false;
         this.sessionNumber = 1;
         this.counterbalanceGroup = null;
+        this.studyConfig = StudyConfig.activeConfig || null;
+        this.studyConfigHash = this.studyConfig ? this.studyConfig.config_hash : null;
+        this.resolvedTaskOrder = [];
+        this.sessionProtocolMetadata = null;
+        this.startTransitionInProgress = false;
         this.selectedTests = [];
         this.currentTestIndex = 0;
         this.results = {};
@@ -2210,8 +2696,11 @@ const App = {
         this.sessionStage = 'idle';
         this.inProgressTestId = null;
         this.quality = this.createQualityState();
-        this.setStartError('');
+        this.clearStartError();
         this.discardSavedSession();
+
+        const startButton = document.getElementById('btn-start');
+        if (startButton) startButton.disabled = false;
 
         document.getElementById('participant-name').value = '';
         document.getElementById('participant-id').value = '';
@@ -2231,6 +2720,7 @@ const App = {
             cb.checked = false;
         });
 
+        StudyConfig.applyActiveConfigurationToParticipantUi();
         this.renderEnvironmentChecks();
         this.renderSavedSessionBanner();
         this.showScreen('screen-start');
@@ -2374,19 +2864,48 @@ const App = {
     },
 
     /**
-     * Deterministically map a participant ID to a Latin-square row.
+     * Deterministically map a participant ID to a Williams-design row.
      * @param {string} participantId
      * @returns {{group: number, order: TestId[]}}
      */
     counterbalanceOrderFor(participantId) {
-        const latin = this.COUNTERBALANCE_LATIN_SQUARE;
-        if (!participantId) return { group: 0, order: latin[0].slice() };
-        const idx = this.simpleHash(participantId) % latin.length;
-        return { group: idx, order: latin[idx].slice() };
+        const design = this.COUNTERBALANCE_WILLIAMS_DESIGN;
+        if (!participantId) return { group: 0, order: design[0].slice() };
+        const idx = this.simpleHash(participantId) % design.length;
+        return { group: idx, order: design[idx].slice() };
+    },
+
+    /**
+     * Derive an independent deterministic seed for a task or stimulus namespace.
+     * This prevents an adaptive task's stopping point from changing later tasks.
+     * @param {string} namespace
+     * @returns {number}
+     */
+    deriveTaskSeed(namespace) {
+        const baseSeed = Number.isFinite(this.randomSeed) ? this.randomSeed >>> 0 : 0;
+        return this.simpleHash([
+            baseSeed,
+            this.participantId || '',
+            this.sessionNumber || 1,
+            namespace || '',
+        ].join('|')) >>> 0;
+    },
+
+    /** @param {number} seed @returns {() => number} */
+    createSeededRandom(seed) {
+        let state = seed >>> 0;
+        return () => {
+            let t = state = (state + 0x6D2B79F5) | 0;
+            t = Math.imul(t ^ (t >>> 15), t | 1);
+            t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+            return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+        };
     },
 
     bumpSessionNumber(participantId) {
         if (!participantId) return 1;
+        if (this.privacyMode) return 1;
+        const historyKey = `${this.studyConfigHash || 'unconfigured'}|${participantId}`;
         let history = {};
         try {
             const raw = localStorage.getItem(this.HISTORY_STORAGE_KEY);
@@ -2394,8 +2913,8 @@ const App = {
         } catch (error) {
             history = {};
         }
-        const next = (history[participantId] || 0) + 1;
-        history[participantId] = next;
+        const next = (history[historyKey] || 0) + 1;
+        history[historyKey] = next;
         try {
             localStorage.setItem(this.HISTORY_STORAGE_KEY, JSON.stringify(history));
         } catch (error) {
@@ -2525,7 +3044,7 @@ const App = {
         return `
             <div class="practice-progress">
                 <div class="trial-progress-label">
-                    <span>練習</span>
+                    <span>${this.t('common.status.practice')}</span>
                     <span>${item} / ${total}</span>
                 </div>
                 <div class="practice-progress-bar">
@@ -2540,9 +3059,9 @@ const App = {
         const pct = Math.min(100, Math.max(0, (current / total) * 100));
         const item = Math.min(current + 1, total);
         return `
-            <div class="main-progress" aria-label="進捗 ${item} / ${total}">
+            <div class="main-progress" aria-label="${this.t('common.status.progress', { current: item, total })}">
                 <div class="trial-progress-label">
-                    <span>本番</span>
+                    <span>${this.t('common.status.test')}</span>
                     <span>${item} / ${total}</span>
                 </div>
                 <div class="main-progress-bar">

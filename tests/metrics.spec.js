@@ -112,3 +112,50 @@ test('_ies helper returns null on zero accuracy', async ({ page }) => {
     expect(result.zeroAcc).toBeNull();
     expect(result.nullRT).toBeNull();
 });
+
+test('adaptive span metrics keep Forward and Backward scores separate', async ({ page }) => {
+    const metrics = await page.evaluate(() => App.computeAdaptiveSpanMetrics([
+        { condition: 'forward', set_size: 2, exact_correct: 1, item_onsets_ms: [0, 1000], item_offsets_ms: [500, 1500], recall_duration_ms: 2100 },
+        { condition: 'forward', set_size: 2, exact_correct: 0, item_onsets_ms: [3000, 4000], item_offsets_ms: [3500, 4500], recall_duration_ms: 2400 },
+        { condition: 'forward', set_size: 3, exact_correct: 1, item_onsets_ms: [6000, 7000, 8000], item_offsets_ms: [6500, 7500, 8500], recall_duration_ms: 2900 },
+        { condition: 'forward', set_size: 3, exact_correct: 0, recall_duration_ms: 3000 },
+        { condition: 'forward', set_size: 4, exact_correct: 0, recall_duration_ms: 3500 },
+        { condition: 'forward', set_size: 4, exact_correct: 0, recall_duration_ms: 3600 },
+        { condition: 'backward', set_size: 2, exact_correct: 1, recall_duration_ms: 2500 },
+        { condition: 'backward', set_size: 2, exact_correct: 1, recall_duration_ms: 2600 },
+        { condition: 'backward', set_size: 3, exact_correct: 0, recall_duration_ms: 3000 },
+        { condition: 'backward', set_size: 3, exact_correct: 0, recall_duration_ms: 3100 },
+        { phase: 'practice', condition: 'backward', set_size: 3, exact_correct: 1 },
+    ], true));
+
+    expect(metrics.forward_span).toBe(3);
+    expect(metrics.forward_correct_trials).toBe(2);
+    expect(metrics.forward_span_x_correct_trials).toBe(6);
+    expect(metrics.backward_span).toBe(2);
+    expect(metrics.backward_correct_trials).toBe(2);
+    expect(metrics.practice_trials_n).toBe(1);
+    expect(metrics.observed_item_visible_ms_mean).toBe(500);
+    expect(metrics.observed_item_soa_ms_mean).toBe(1000);
+});
+
+test('adaptive recall duration and staircase errors do not trigger generic RT/accuracy QC', async ({ page }) => {
+    const flags = await page.evaluate(() => {
+        App.participantId = 'SPAN-QC';
+        App.selectedTests = ['visual_digit_span'];
+        App.results = { visual_digit_span: { score: 4, accuracy: 25, timeoutCount: 0 } };
+        App.trialData = {
+            visual_digit_span: [
+                { condition: 'forward', set_size: 2, exact_correct: 1, responseTime: 12000 },
+                { condition: 'forward', set_size: 3, exact_correct: 0, responseTime: 14000 },
+            ],
+        };
+        App.quality.outlier_thresholds = { rt_too_fast_ms: 150, rt_too_slow_ms: 5000 };
+        App.quality.environment = { viewportWidth: 1280, viewportHeight: 900, localStorageAvailable: 1 };
+        App.quality.warnings = [];
+        App.quality.blocks = [];
+        return App.buildQualityFlags();
+    });
+    expect(flags.low_accuracy_flag).toBe(0);
+    expect(flags.fast_response_flag).toBe(0);
+    expect(flags.slow_response_flag).toBe(0);
+});

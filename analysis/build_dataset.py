@@ -31,6 +31,7 @@ from analyze import (
     ordered_fieldnames,
     process_file,
     process_qc_multiverse_file,
+    study_config_hash_from_payload,
 )
 
 
@@ -78,8 +79,14 @@ def base_context(path: Path, payload: dict[str, Any], integrity_ok: bool | None)
         "file": path.name,
         "export_type": path.suffix.lower().lstrip("."),
         "integrity_ok": "" if integrity_ok is None else int(bool(integrity_ok)),
+        "study_config_hash": study_config_hash_from_payload(payload),
         "participant_id": participant.get("participantId") or manifest.get("participant_id"),
         "session_number": participant.get("session_number") or manifest.get("session_number"),
+        "ui_language": participant.get("ui_language") or protocol.get("ui_language"),
+        "instruction_language": participant.get("instruction_language") or protocol.get("instruction_language"),
+        "stimulus_language": participant.get("stimulus_language") or protocol.get("stimulus_language"),
+        "consent_language": participant.get("consent_language") or protocol.get("consent_language"),
+        "translation_version": participant.get("translation_version") or protocol.get("translation_version"),
         "app_version": protocol.get("app_version") or manifest.get("app_version") or payload.get("version"),
         "protocol_version": protocol.get("protocol_version"),
         "task_version": protocol.get("task_version"),

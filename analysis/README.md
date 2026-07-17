@@ -42,7 +42,8 @@ Rscript analyze.R /path/to/exports summary.csv
 
 出力される CSV には、各参加者・各課題について以下を含みます。
 
-- 基本情報: `participant_id`, `session_number`, `age`, `random_seed`
+- 基本情報: `study_config_hash`, `participant_id`, `session_number`, `age`, `random_seed`
+- 実施言語: `ui_language`, `instruction_language`, `stimulus_language`, `consent_language`, `translation_version`
 - 版数: `app_version`, `protocol_version`, `task_version`, `scoring_version`, `stimulus_version`
 - 環境: `browser`, `viewport_width`, `viewport_height`, `device_pixel_ratio`, `refresh_rate_hz_estimate`
 - 品質: `tab_hidden`, `blur_count`, `long_task_count`, `grayscale_confirmed`, `viewing_distance_cm`, `review_recommendation`, `review_notes`, `*_flag`
@@ -50,12 +51,18 @@ Rscript analyze.R /path/to/exports summary.csv
 - Flanker: 正答率、平均 RT（正答試行のみ、RT 除外後）、`congruency_effect_ms`, `ies_incongruent_ms`, `inattention_flag`
 - DCCS: 正答率、`switch_cost_ms`, `inattention_flag`
 - Pattern Comparison: 正答率、`d_prime`, `ies_correct_ms`
+- Visual Digit Span: `forward_span`, `backward_span`、条件別完全正答試行数、実測点灯時間・SOA
+- eCorsi: `forward_span`, `backward_span`、条件別 Kessels 型 Total Score、初回タップ潜時、実測点灯時間・SOA
+
+提出データの重複判定と participant summary / QC multiverse の結合には、`study_config_hash`, `participant_id`, `session_number` の3項目を基本キーとして使用します。研究設定ハッシュを持たない旧形式の提出データには、明示的な互換値 `__legacy_no_study_config__` が入ります。
 
 ## 外れ値除外の方針
 
 スクリプトは、各 JSON の `outlier_thresholds` セクションに記録された値を優先的に使用します（既定: `rt_exclude_below_ms = 100`, `rt_too_slow_ms = 5000`）。閾値は Web アプリ側で固定されており、解析時に上書きしたい場合はスクリプト内の `rt_low` / `rt_high` を編集してください。
 
 アプリ側は **自動除外を行いません**。不注意フラグ（`inattention_flag`）、`quality_flags`、`Researcher Review` の `review_recommendation` / `review_notes` を確認してください。除外判断は `QC Multiverse` による感度分析として扱い、主要解析と複数の QC universe の結果を並べて報告することを推奨します。
+
+Visual Digit Span と eCorsi は適応的停止法のため、終了直前の誤答は手続き上必然です。また回答時間は自由再生時間であり速度得点ではありません。この2課題の誤答率と `recall_duration_ms` は、固定試行課題向けの低正答率・極端RT QCには含めません。
 
 ## Researcher Review
 
