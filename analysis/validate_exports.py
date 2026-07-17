@@ -21,10 +21,12 @@ from typing import Any
 
 from analyze import (
     _OPENPYXL_AVAILABLE,
+    LEGACY_STUDY_CONFIG_HASH,
     collect_export_files,
     load_payload,
     qc_multiverse_rows,
     sheet_to_records,
+    study_config_hash_from_payload,
     summarize_qc_multiverse,
 )
 
@@ -34,10 +36,11 @@ else:  # pragma: no cover - only reached when dependency is absent
     load_workbook = None
 
 
-EXPECTED_APP_VERSION = "cb-2026-05-research-v5"
-EXPECTED_PROTOCOL_VERSION = "protocol-2026-05-remote-adult-v1"
-EXPECTED_TASK_VERSION = "tasks-2026-05-v1"
-EXPECTED_SCORING_VERSION = "scoring-2026-05-v1"
+EXPECTED_APP_VERSION = "cb-2026-07-research-v8"
+EXPECTED_PROTOCOL_VERSION = "protocol-2026-07-study-config-v4"
+EXPECTED_TASK_VERSION = "tasks-2026-07-v3"
+EXPECTED_SCORING_VERSION = "scoring-2026-07-v2"
+EXPECTED_TRANSLATION_VERSION = "translations-2026-07-ja-en-v3"
 EXPECTED_QC_MULTIVERSE_VERSION = "qc-multiverse-2026-05-v1"
 EXPECTED_QC_UNIVERSE_COUNT = 5
 
@@ -59,6 +62,8 @@ RAW_SHEET_TO_TEST_ID = {
     "dccs_raw": "dccs",
     "pattern_comparison_raw": "pattern-comparison",
     "list_sorting_raw": "list-sorting",
+    "visual_digit_span_raw": "visual_digit_span",
+    "ecorsi_raw": "ecorsi",
     "picture_sequence_raw": "picture-sequence",
 }
 
@@ -79,11 +84,17 @@ REPORT_FIELDS = [
     "warning_count",
     "participant_id",
     "session_number",
+    "study_config_hash",
     "app_version",
     "protocol_version",
     "task_version",
     "scoring_version",
     "stimulus_version",
+    "translation_version",
+    "ui_language",
+    "instruction_language",
+    "stimulus_language",
+    "consent_language",
     "qc_multiverse_version",
     "export_format",
     "export_manifest_version",
@@ -165,6 +176,7 @@ def version_checks(row: dict[str, Any], protocol: dict[str, Any], manifest: dict
     protocol_version = protocol.get("protocol_version")
     task_version = protocol.get("task_version")
     scoring_version = protocol.get("scoring_version")
+    translation_version = protocol.get("translation_version") or manifest.get("translation_version")
     qc_version = protocol.get("qc_multiverse_version") or manifest.get("qc_multiverse_version")
 
     row["app_version"] = app_version or ""
@@ -172,6 +184,7 @@ def version_checks(row: dict[str, Any], protocol: dict[str, Any], manifest: dict
     row["task_version"] = task_version or ""
     row["scoring_version"] = scoring_version or ""
     row["stimulus_version"] = protocol.get("stimulus_version") or ""
+    row["translation_version"] = translation_version or ""
     row["qc_multiverse_version"] = qc_version or ""
 
     required_versions = {
@@ -179,6 +192,7 @@ def version_checks(row: dict[str, Any], protocol: dict[str, Any], manifest: dict
         "protocol_version": protocol_version,
         "task_version": task_version,
         "scoring_version": scoring_version,
+        "translation_version": translation_version,
         "qc_multiverse_version": qc_version,
     }
     for name, value in required_versions.items():
@@ -190,6 +204,7 @@ def version_checks(row: dict[str, Any], protocol: dict[str, Any], manifest: dict
         "protocol_version": EXPECTED_PROTOCOL_VERSION,
         "task_version": EXPECTED_TASK_VERSION,
         "scoring_version": EXPECTED_SCORING_VERSION,
+        "translation_version": EXPECTED_TRANSLATION_VERSION,
         "qc_multiverse_version": EXPECTED_QC_MULTIVERSE_VERSION,
     }
     for name, expected_value in expected.items():
@@ -208,7 +223,17 @@ def validate_payload(path: Path, payload: dict[str, Any], integrity_ok: bool | N
     session_number = participant.get("session_number") or manifest.get("session_number")
     row["participant_id"] = participant_id or ""
     row["session_number"] = session_number or ""
+    row["study_config_hash"] = study_config_hash_from_payload(payload)
     row["integrity_ok"] = "" if integrity_ok is None else int(bool(integrity_ok))
+
+    supported_languages = {"ja", "en"}
+    for field in ["ui_language", "instruction_language", "stimulus_language", "consent_language"]:
+        value = participant.get(field) or protocol.get(field)
+        row[field] = value or ""
+        if not present(value):
+            issue(row, "warning", f"missing {field}")
+        elif value not in supported_languages:
+            issue(row, "error", f"unsupported {field}: {value}")
 
     if not present(participant_id):
         issue(row, "error", "missing participant_id")
@@ -296,15 +321,23 @@ def validate_file(path: Path) -> dict[str, Any]:
 
 
 def mark_duplicates(rows: list[dict[str, Any]]) -> None:
-    seen: dict[tuple[str, str], str] = {}
+    seen: dict[tuple[str, str, str], str] = {}
     for row in rows:
+        study_config_hash = str(
+            row.get("study_config_hash") or LEGACY_STUDY_CONFIG_HASH
+        ).strip()
         participant_id = str(row.get("participant_id", "")).strip()
         session_number = str(row.get("session_number", "")).strip()
         if not participant_id or not session_number:
             continue
-        key = (participant_id, session_number)
+        key = (study_config_hash, participant_id, session_number)
         if key in seen:
-            issue(row, "error", f"duplicate participant_id/session_number also in {seen[key]}")
+            issue(
+                row,
+                "error",
+                "duplicate study_config_hash/participant_id/session_number "
+                f"also in {seen[key]}",
+            )
         else:
             seen[key] = str(row.get("file", ""))
 

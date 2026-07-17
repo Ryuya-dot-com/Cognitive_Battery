@@ -1,8 +1,8 @@
 {
   "name": "cognitive-battery",
-  "version": "0.2.0",
+  "version": "0.5.0",
   "private": true,
-  "description": "Web-based cognitive battery for Japanese-speaking adults.",
+  "description": "Bilingual Japanese-English web-based cognitive battery for adults.",
   "scripts": {
     "serve": "python3 -m http.server 8765",
     "test": "playwright test",

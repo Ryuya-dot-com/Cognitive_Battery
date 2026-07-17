@@ -1,39 +1,47 @@
 # Cognitive Battery
 
-日本語を母語とする成人を対象に、Web 上で実施する認知機能テストバッテリーです。  
+日本語または英語で、Web 上から実施できる成人向け認知機能テストバッテリーです。
+
 GitHub Pages での公開を想定しており、参加者は自宅から PC で実施します。
 
-このアプリは、`Flanker`、`DCCS`、`List Sorting`、`Pattern Comparison`、`Picture Sequence` に着想を得ていますが、**NIH Toolbox の厳密再現ではありません**。  
+このアプリは、`Flanker`、`DCCS`、`List Sorting`、`Visual Digit Span`、`eCorsi`、`Pattern Comparison`、`Picture Sequence` の先行研究に基づく手続きを実装していますが、**NIH Toolbox、WAIS、その他の市販検査の厳密再現ではありません**。
+
 位置づけとしては、先行研究を参考にした **独自 Web 版バッテリー** です。
 
 ## 想定用途
 
-- 日本語話者の成人参加者に対する遠隔実施
+- 日本語話者・英語話者の成人参加者に対する遠隔実施
 - サンプル内での相対比較
 - 受験者提出用の Excel 1 ファイル保存
 - GitHub Pages での静的配信
 
 ## 特徴
 
-- 5つの課題を 1 つの画面で連続実施
+- 7つの課題を 1 つの画面で連続実施
+- 同意前に選択する日本語／英語表示（URL の `?lang=ja` / `?lang=en` でも指定可能）
+- `?mode=researcher` で開く専用の Study Configuration 画面
+- 研究者による実施言語の固定、課題選択、Williams design／固定カスタム順序の指定
+- 研究設定プリセットの端末内保存・読込と、設定を埋め込んだ参加者リンクの生成
+- 正規化した研究設定の SHA-256、設定 ID、実際の課題順を Excel／JSON に記録
 - 参加前の説明と同意確認（Informed consent チェック、`CONSENT_VERSION` 追跡）
 - 開始前の環境チェックと 8 段階グレースケール確認
 - 刺激のプリロードとセッション開始時のウォームアップ
 - `requestAnimationFrame` 同期 + `KeyboardEvent.timeStamp` による反応時間計測
 - `PerformanceObserver('longtask')` でテスト中のフレーム逸脱を自動記録
 - 試行順を再現可能にする seedable PRNG（mulberry32）
-- 参加者 ID を FNV-1a ハッシュし 5×5 Latin square でカウンターバランス
+- 参加者 ID を FNV-1a ハッシュし、14順序の Williams design で7課題をカウンターバランス
+- 適応的スパン課題には独立した task seed を導出し、早期中止が後続課題の刺激に影響しない設計
 - セッションの自動保存と復元（乱数状態・セッション番号を含む）
 - 同一参加者 ID のセッション番号を自動採番（リテスト対応）
 - フルスクリーン試行
 - タブ離脱、フォーカス離脱、画面サイズ変更などの品質ログ取得
-- プロトコル・課題・採点・刺激プールの版数を出力に固定記録
+- プロトコル・課題・採点・刺激プール・翻訳の版数と実施言語を出力に固定記録
 - 研究者レビュー用の品質フラグ（低正答率、極端 RT、環境警告、フォーカス離脱など）を自動集計
 - Quality Control を Multiverse Analysis として扱う `QC Multiverse` 出力
 - 課題ごとのスコア、研究用メトリクス（IES、d′、congruency effect、switch cost、inattention flag 等）、試行別データを Excel に集約
 - 研究者向け詳細として JSON 出力も可能（通常の受験者提出は Excel のみ）
 - 出力ファイルに同梱された Codebook シートで列の意味・単位を明示
-- Playwright による自動テストスイート（39 テスト）
+- Playwright による自動テストスイート
 - Python / R の解析テンプレートと提出Excel検証ツール（ex-Gaussian フィット対応）
 
 ## 含まれる課題
@@ -41,8 +49,48 @@ GitHub Pages での公開を想定しており、参加者は自宅から PC で
 1. フランカー課題（抑制制御・注意）
 2. カード分類課題（認知的柔軟性）
 3. リストソート課題（ワーキングメモリ）
-4. パターン比較課題（処理速度）
-5. 系列記憶課題（エピソード記憶）
+4. 視覚数字スパン課題（Forward / Backward、ワーキングメモリ）
+5. eCorsi課題（Forward / Backward、視空間ワーキングメモリ）
+6. パターン比較課題（処理速度）
+7. 系列記憶課題（エピソード記憶）
+
+## 日本語／英語の切り替え
+
+開始画面の言語セレクター、または URL の `?lang=ja` / `?lang=en` で実施言語を指定できます。同意後に課題を開始すると言語は固定され、セッション途中では変更できません。言語を切り替えた場合は、切り替え後の同意文を確認できるよう同意チェックが解除されます。
+
+表示言語は `ui_language`、教示言語は `instruction_language`、刺激語の言語は `stimulus_language`、同意文の言語は `consent_language` として記録されます。翻訳辞書の版は `translation_version`、言語別同意文の版は `consent_version` に保存されます。課題 ID、Excel シート名、列名、回答コードは言語を切り替えても変わりません。
+
+Flanker、DCCS、Pattern Comparison、Visual Digit Span、eCorsiは、刺激の構造を変えずに教示・画面文言を切り替えます。List SortingとPicture Sequenceは表示語が刺激の一部であるため、安定した刺激 ID と日英ラベルを分離し、言語別刺激バンクとして版管理します。日英版の測定等価性や規準値は保証されないため、言語別にパイロット検証し、実施言語を解析時の層別変数または共変量として扱ってください。
+
+## 研究者用 Study Configuration
+
+研究者設定は、通常の参加者画面とは別の次のURLから開きます。
+
+```text
+http://localhost:8000/?mode=researcher
+```
+
+設定できる項目は、研究ID、既定の実施言語、参加者による言語変更の可否、実施課題、課題順序です。課題順序は次の2方式から選べます。
+研究者画面自体の日本語／英語は画面右上で切り替えられ、参加者の既定実施言語とは独立しています。
+
+- **Williams design** — 全7課題を必須とし、参加者IDに基づいて14順序へ決定論的に割り当てます
+- **固定カスタム順序** — 任意の部分バッテリーを選び、選択済み課題の上下ボタンで全参加者共通の順序を指定します
+
+「適用して参加者画面へ」を選ぶと設定はこの端末に保存され、参加者画面の言語・課題選択が固定されます。言語変更を許可した設定では、参加者が開始前に日本語／英語を変更できます。設定プリセットには参加者情報や結果は含まれません。
+
+「参加者リンクをコピー」は設定JSONをURLに埋め込みます。リンク先では同じ設定を再計算・検証して適用します。ただし本アプリは静的アプリであり、この機能は設定伝達と操作上のロックを目的とするもので、認証や改ざん防止の電子署名ではありません。
+
+刺激バンク、提示時間、試行数、停止規則、採点方法は、先行研究を参照した独自Web実装の `literature-aligned-2026-07-v1` 固定プリセットとして版管理され、研究者画面からは変更できません。設定本体は正規化後に SHA-256 を計算し、`study_config_id`、`study_config_hash`、`task_order_policy`、`configured_tasks`、`resolved_task_order` とともに出力されます。
+
+### Visual Digit Span / eCorsi の固定プロトコル
+
+両課題とも Forward と Backward を別条件として保持し、系列長2から開始します。本番は各系列長2試行で、1試行以上を完全正答すると次の系列長へ進み、同じ系列長の2試行を両方誤るとその条件を終了します（上限9）。部分点では進行せず、条件別の最長完全正答系列を span とします。
+
+- **Visual Digit Span**: 数字1–9を黒色で1つずつ提示。点灯500 ms、SOA 1000 ms。Forward の後に Backward を実施し、画面上の数字キーまたはキーボードで回答
+- **eCorsi**: 不規則に配置した9ブロックを500 ms点灯、SOA 1000 msで提示。各条件の前に長さ3の練習を3試行実施。回答はブロックを選び、取り消し・確定が可能
+- **記録**: 提示系列、Backward用の正解系列、全回答、各刺激の実測点灯・消灯時刻、回答確定までの時間、eCorsiの初回タップ潜時と入力方法
+
+根拠資料は Ebaid & Crewther (2018)、Kemtes & Allen (2008)、Brunetti et al. (2014)、Kessels et al. (2000) です。刺激系列とeCorsi配置は独自に作成しており、WAIS等の市販検査項目・規準値や、論文掲載の標準系列リストは複製していません。視覚提示の数字スパンは聴覚提示版と成績特性が異なるため、聴覚版の規準値を流用しないでください。
 
 ## 実施環境
 
@@ -77,11 +125,12 @@ GitHub Pages での公開を想定しており、参加者は自宅から PC で
 ### Excel 出力のシート構成
 
 - `Export Manifest` — 提出ファイルの版数、保存時刻、参加者 ID、セッション番号、含まれるシート一覧
-- `Participant` — 参加者メタデータ（ID・年齢・同意・視距離）、乱数シード、実施環境、外れ値閾値
+- `Participant` — 参加者メタデータ（ID・年齢・同意・視距離・実施言語）、乱数シード、実施環境、外れ値閾値
 - `Scores` — 各課題の総合スコア、正答率、SAA の成分スコア、タイムアウト件数
 - `Research Metrics` — 課題別詳細指標（全試行を 1 行のワイド形式）
 - `Task Metrics Long` — 課題別メトリクスを「1 行 = 1 指標」の long 形式で記録
-- `Protocol Metadata` — アプリ、プロトコル、課題、採点、刺激プール、タイミング手続きの版数
+- `Protocol Metadata` — アプリ、プロトコル、課題、採点、刺激プール、翻訳、実施言語、タイミング手続きの版数
+- `Study Configuration` — 研究設定ID・SHA-256、言語ポリシー、設定課題、順序方式、固定順と実際の割当順
 - `Researcher Review` — 品質フラグ、確認メモ、課題別スコア・刺激条件を 1 行で集約
 - `QC Multiverse` — 複数の QC universe と、その universe での含入候補 / 除外候補を長形式で記録
 - `Session Quality` — タブ離脱、フォーカス離脱、フルスクリーン解除等のセッション品質指標
@@ -94,7 +143,7 @@ GitHub Pages での公開を想定しており、参加者は自宅から PC で
 - 通常の受験者提出には使いません
 - 研究者向け詳細メニューから、必要な場合だけ JSON 1 ファイルを保存できます
 - R / Python での解析にも直接読み込めます
-- キーは Excel のシート名に対応（`participant`, `protocol`, `quality_flags`, `researcher_review`, `qc_multiverse`, `environment`, `research_metrics`, `task_metrics_long`, `trials`, `codebook` など）
+- キーは Excel のシート名に対応（`participant`, `protocol`, `study_configuration`, `quality_flags`, `researcher_review`, `qc_multiverse`, `environment`, `research_metrics`, `task_metrics_long`, `trials`, `codebook` など）
 
 ### 計算される主な研究用メトリクス
 
@@ -102,6 +151,8 @@ GitHub Pages での公開を想定しており、参加者は自宅から PC で
 - **DCCS**: 正答率（dominant / non-dominant / overall）、反応時間各種、`switch_cost_ms`、IES
 - **Pattern Comparison**: hit rate, false alarm rate, d′, criterion c, mean RT, IES
 - **List Sorting**: 条件別（single / dual）正答率、正答最大スパン
+- **Visual Digit Span**: Forward / Backward 別の最長完全正答系列、完全正答試行数、span × 完全正答試行数、実測提示時間
+- **eCorsi**: Forward / Backward 別の block span、完全正答試行数、Kessels 型 Total Score、初回タップ潜時、実測提示時間
 - **Picture Sequence**: 隣接ペア数、学習勾配、平均応答時間
 
 ### 試行レベルデータのタイムスタンプ
@@ -153,9 +204,12 @@ Cognitive_Battery/
 │  └─ style.css
 ├─ js/
 │  ├─ main.js            # 画面遷移、PRNG、RAF 同期、プリロード、Excel 出力
+│  ├─ study-config.js     # 研究者設定、プリセット、参加者リンク、設定ハッシュ
 │  ├─ flanker.js
 │  ├─ dccs.js
 │  ├─ list-sorting.js
+│  ├─ visual-digit-span.js
+│  ├─ ecorsi.js
 │  ├─ pattern-comparison.js
 │  └─ picture-sequence.js
 ├─ analysis/
@@ -225,20 +279,23 @@ python analysis/build_dataset.py /path/to/exports dataset --validation-report va
 
 ## カウンターバランス
 
-全 5 課題を実施する場合、実施順は参加者 ID の FNV-1a ハッシュから 5×5 Latin square の行を決定します。これにより、参加者ごとに以下の性質が保証されます。
+全 7 課題を実施する場合、実施順は参加者 ID の FNV-1a ハッシュから14順序の Williams design（7つの基本行と各逆順）の行を決定します。これにより、参加者ごとに以下の性質が保証されます。
 
 - **決定論性**: 同じ ID は常に同じ順序に割り当てられる
-- **均衡**: 500 人以上のサンプルで、5 つの順序グループに 20% 前後で分散
-- **Latin 条件**: 各課題が各位置（1 番目〜5 番目）に等頻度で現れる
+- **均衡**: 十分なサンプルで14の順序グループにほぼ均等に分散
+- **位置均衡**: 各課題が各位置（1 番目〜7 番目）に等頻度で現れる
+- **一次持越し均衡**: 逆順を含めることで、直前課題の組み合わせを均衡化
 
-順序は `counterbalance_group`（0–4）と `counterbalance_order`（カンマ区切り）として `Participant` シートおよび JSON に記録されます。一部のテストのみを選択した場合、カウンターバランスは適用されません。
+順序は `counterbalance_group`（0–13）と `counterbalance_order`（カンマ区切り）として `Participant` シートおよび JSON に記録されます。一部のテストのみを選択した場合、カウンターバランスは適用されません。
 
 ## 刺激プール
 
-- **Picture Sequence**: 4 テーマ（朝の準備・料理を作る・旅行の準備・オフィスの一日）からランダムに 1 つ選択。選ばれたテーマは `theme` として試行データに記録
-- **List Sorting Single 条件**: 3 ドメイン（動物・食べ物・乗り物）からランダム選択。選ばれたドメインは `category` に記録
+- **Picture Sequence**: 4 テーマ（朝の準備・料理を作る・旅行の準備・オフィスの一日）からランダムに 1 つ選択。選ばれたテーマ、言語に依存しない刺激 ID、表示ラベル、刺激言語、刺激バンク版を試行データに記録
+- **List Sorting Single 条件**: 3 ドメイン（動物・食べ物・乗り物）からランダム選択。カテゴリ、言語に依存しない刺激 ID、表示ラベル、刺激言語、刺激バンク版を試行データに記録
 - **List Sorting Dual 条件**: 動物 + 食べ物の組み合わせに固定（NIH 準拠）
 - **DCCS**: 3 つの bivalent カードセット（青星/赤丸、緑三角/黄四角、紫星/橙三角）からセッション単位でランダム選択。`setId` が試行データに記録される
+- **Visual Digit Span**: 独自に作成した版管理済み系列（数字1–9、系列内重複なし）。市販検査の項目・規準値は含まない
+- **eCorsi**: 独自の9ブロック配置と版管理済み系列。公開論文の標準系列そのものは複製しない
 
 ## キーボード完結操作
 
@@ -246,6 +303,8 @@ python analysis/build_dataset.py /path/to/exports dataset --validation-report va
 
 - **Flanker / DCCS / Pattern Comparison**: F / J キーで応答
 - **List Sorting**: Tab で項目間を移動、Enter / Space で選択、Backspace で直前の選択を取り消し
+- **Visual Digit Span**: 1〜9 で入力、Backspace で直前の数字を取り消し、Enter で確定
+- **eCorsi**: Tab でブロック間を移動、Enter / Space で選択、Backspace / Delete で取り消し、確定ボタンで回答
 - **Picture Sequence**: Tab で移動、Enter / Space でアイテムを選択 → 空きスロットで再度 Enter で配置、スロット上で Backspace / Delete で取り消し
 
 各入力可能要素は `role="button"`・`tabindex="0"`・`aria-label` を持ち、キー操作時には `focus-visible` アウトラインが表示されます。
@@ -255,6 +314,7 @@ python analysis/build_dataset.py /path/to/exports dataset --validation-report va
 共有 PC での実施時に使えるオプションです。同意画面のチェックボックス「この端末に進行状況を保存しない」をオンにすると、
 
 - `localStorage` へのセッション保存を一切行いません
+- 参加者ID別の再検査回数履歴も消去し、この実施では新たに保存しません
 - 途中復元はできなくなりますが、前の参加者データが端末に残る心配もありません
 - 設定は `Participant` シートの `privacy_mode` 列（1/0）に記録されます
 
@@ -263,7 +323,7 @@ python analysis/build_dataset.py /path/to/exports dataset --validation-report va
 ```bash
 npm install                   # 初回のみ
 npx playwright install chromium  # 初回のみ
-npm test                      # 39 テストを実行
+npm test                      # 自動テスト一式を実行
 npm run test:ui               # Playwright UI モードで対話的に実行
 ```
 
@@ -292,6 +352,6 @@ GitHub Actions（`.github/workflows/test.yml`）が push / PR ごとに全テス
 - 大きくなった JavaScript の段階的なモジュール分割と TypeScript 移行
 - スクリーンリーダーでの実機動作確認と修正
 - localStorage の opt-in 暗号化（passphrase ベース）
-- i18n（英語・中国語）対応
+- 中国語など、日英以外の言語バンク追加
 - アダプティブ手続き（staircase）を Pattern Comparison に
 - ディスプレイ較正（gamma / luminance）のガイド追加

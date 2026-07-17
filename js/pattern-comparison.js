@@ -1,5 +1,68 @@
 // ==================== Pattern Comparison Processing Speed Test ====================
 
+I18n.register('pattern-comparison', {
+    ja: {
+        name: 'パターン比較課題',
+        domain: '処理速度',
+        statusInstructions: '課題説明',
+        statusPractice: '練習',
+        statusTest: '本番',
+        title: 'パターン比較課題',
+        introPatterns: '2つの図形パターンが左右に表示されます。',
+        introDecision: '2つのパターンが<strong>同じ</strong>か<strong>違う</strong>かを、できるだけ速く判断してください。',
+        introSame: '同じ場合: <span class="key-hint">F キー</span> または「同じ」ボタン',
+        introDifferent: '違う場合: <span class="key-hint">J キー</span> または「違う」ボタン',
+        introTime: '制限時間は <strong>80秒</strong> です。時間内にできるだけ多くの問題に正確に答えてください。',
+        practiceFirst: 'まず練習から始めます（練習は時間制限なし）。',
+        start: '開始',
+        remainingTime: '残り {seconds} 秒',
+        leftPattern: '左のパターン',
+        rightPattern: '右のパターン',
+        same: '同じ',
+        different: '違う',
+        keyGuideSame: '← F: 同じ',
+        keyGuideDifferent: 'J: 違う →',
+        correct: '正解',
+        incorrect: '不正解',
+        practiceComplete: '練習完了',
+        testReminder: '本番は <strong>80秒</strong> の制限時間内に、できるだけ多くの問題に正確に答えてください。',
+        noFeedback: '※ 本番では正誤のフィードバックは表示されません。',
+        readyPrompt: '準備ができたら「本番開始」を押してください。',
+        startTest: '本番開始',
+        resultDetail: '{correct}問正解 / {attempted}問回答',
+    },
+    en: {
+        name: 'Pattern Comparison Task',
+        domain: 'Processing Speed',
+        statusInstructions: 'Instructions',
+        statusPractice: 'Practice',
+        statusTest: 'Test',
+        title: 'Pattern Comparison Task',
+        introPatterns: 'Two shape patterns will appear side by side.',
+        introDecision: 'Decide as quickly as possible whether the two patterns are <strong>the same</strong> or <strong>different</strong>.',
+        introSame: 'If they are the same: press the <span class="key-hint">F key</span> or select the Same button.',
+        introDifferent: 'If they are different: press the <span class="key-hint">J key</span> or select the Different button.',
+        introTime: 'The time limit is <strong>80 seconds</strong>. Answer as many items as you can, as accurately as possible.',
+        practiceFirst: 'You will begin with untimed practice.',
+        start: 'Start',
+        remainingTime: '{seconds} seconds remaining',
+        leftPattern: 'Left pattern',
+        rightPattern: 'Right pattern',
+        same: 'Same',
+        different: 'Different',
+        keyGuideSame: '← F: Same',
+        keyGuideDifferent: 'J: Different →',
+        correct: 'Correct',
+        incorrect: 'Incorrect',
+        practiceComplete: 'Practice Complete',
+        testReminder: 'During the test, answer as many items as you can, as accurately as possible, within <strong>80 seconds</strong>.',
+        noFeedback: 'Correctness feedback will not be shown during the test.',
+        readyPrompt: 'When you are ready, select Start Test.',
+        startTest: 'Start Test',
+        resultDetail: '{correct} correct / {attempted} attempted',
+    },
+});
+
 const PatternComparisonTest = {
     PRACTICE_TRIALS: 6,
     TIME_LIMIT_MS: 80000,
@@ -18,6 +81,14 @@ const PatternComparisonTest = {
     responded: false,
     testEnded: false,
 
+    t(key, params) {
+        return App.t(`pattern-comparison.${key}`, params);
+    },
+
+    updateStatus(key) {
+        if (typeof App.updateTestStatus === 'function') App.updateTestStatus(this.t(key));
+    },
+
     // Shape types and colors
     SHAPES: ['circle', 'square', 'triangle', 'diamond', 'cross'],
     COLORS: ['#e74c3c', '#3498db', '#2ecc71', '#f39c12', '#9b59b6', '#1abc9c'],
@@ -31,17 +102,18 @@ const PatternComparisonTest = {
     },
 
     showInstructions() {
+        this.updateStatus('statusInstructions');
         const content = App.getTestContent();
         content.innerHTML = `
             <div class="instructions">
-                <h2>パターン比較課題</h2>
-                <p>2つの図形パターンが左右に表示されます。</p>
-                <p>2つのパターンが<strong>同じ</strong>か<strong>違う</strong>かを、できるだけ速く判断してください。</p>
-                <p>同じ場合: <span class="key-hint">F キー</span> または「同じ」ボタン</p>
-                <p>違う場合: <span class="key-hint">J キー</span> または「違う」ボタン</p>
-                <p>制限時間は <strong>80秒</strong> です。時間内にできるだけ多くの問題に正確に答えてください。</p>
-                <p>まず練習から始めます（練習は時間制限なし）。</p>
-                <button class="btn btn-primary" id="btn-pc-start">開始</button>
+                <h2>${this.t('title')}</h2>
+                <p>${this.t('introPatterns')}</p>
+                <p>${this.t('introDecision')}</p>
+                <p>${this.t('introSame')}</p>
+                <p>${this.t('introDifferent')}</p>
+                <p>${this.t('introTime')}</p>
+                <p>${this.t('practiceFirst')}</p>
+                <button class="btn btn-primary" id="btn-pc-start">${this.t('start')}</button>
             </div>
         `;
         document.getElementById('btn-pc-start').addEventListener('click', () => this.startPractice());
@@ -189,6 +261,7 @@ const PatternComparisonTest = {
     },
 
     startPractice() {
+        this.updateStatus('statusPractice');
         this.isPractice = true;
         this.currentTrial = 0;
         this.practiceItems = [];
@@ -199,6 +272,7 @@ const PatternComparisonTest = {
     },
 
     startTest() {
+        this.updateStatus('statusTest');
         this.isPractice = false;
         this.currentTrial = 0;
         this.trials = [];
@@ -221,7 +295,7 @@ const PatternComparisonTest = {
 
             const timerText = document.getElementById('pc-timer-text');
             const timerFill = document.getElementById('pc-timer-fill');
-            if (timerText) timerText.textContent = `残り ${seconds} 秒`;
+            if (timerText) timerText.textContent = this.t('remainingTime', { seconds });
             if (timerFill) timerFill.style.width = `${pct}%`;
 
             if (remaining <= 0) {
@@ -257,7 +331,7 @@ const PatternComparisonTest = {
             topHtml = App.practiceProgressHtml(this.currentTrial, this.PRACTICE_TRIALS);
         } else {
             topHtml = `
-                <div class="timer-text" id="pc-timer-text" aria-live="off">残り 80.0 秒</div>
+                <div class="timer-text" id="pc-timer-text" aria-live="off">${this.t('remainingTime', { seconds: '80.0' })}</div>
                 <div class="timer-bar"><div class="timer-bar-fill" id="pc-timer-fill" style="width:100%"></div></div>
             `;
         }
@@ -265,14 +339,14 @@ const PatternComparisonTest = {
         content.innerHTML = `
             ${topHtml}
             <div class="pattern-container">
-                <canvas id="pc-canvas-left" width="${this.CANVAS_SIZE}" height="${this.CANVAS_SIZE}" aria-label="左のパターン"></canvas>
-                <canvas id="pc-canvas-right" width="${this.CANVAS_SIZE}" height="${this.CANVAS_SIZE}" aria-label="右のパターン"></canvas>
+                <canvas id="pc-canvas-left" width="${this.CANVAS_SIZE}" height="${this.CANVAS_SIZE}" aria-label="${this.t('leftPattern')}"></canvas>
+                <canvas id="pc-canvas-right" width="${this.CANVAS_SIZE}" height="${this.CANVAS_SIZE}" aria-label="${this.t('rightPattern')}"></canvas>
             </div>
             <div class="pattern-response">
-                <button class="btn btn-success" id="btn-same">同じ (F)</button>
-                <button class="btn btn-danger" id="btn-diff">違う (J)</button>
+                <button class="btn btn-success" id="btn-same">${this.t('same')} (F)</button>
+                <button class="btn btn-danger" id="btn-diff">${this.t('different')} (J)</button>
             </div>
-            ${this.isPractice ? '<div class="pc-key-guide"><span class="key-guide-left">← F: 同じ</span><span class="key-guide-right">J: 違う →</span></div>' : ''}
+            ${this.isPractice ? `<div class="pc-key-guide"><span class="key-guide-left">${this.t('keyGuideSame')}</span><span class="key-guide-right">${this.t('keyGuideDifferent')}</span></div>` : ''}
         `;
 
         this.drawPattern(document.getElementById('pc-canvas-left'), item.left);
@@ -312,7 +386,7 @@ const PatternComparisonTest = {
 
         if (this.isPractice) {
             const content = App.getTestContent();
-            content.innerHTML = `<div class="feedback ${correct ? 'correct' : 'incorrect'}" role="status" aria-live="assertive">${correct ? '正解' : '不正解'}</div>`;
+            content.innerHTML = `<div class="feedback ${correct ? 'correct' : 'incorrect'}" role="status" aria-live="assertive">${this.t(correct ? 'correct' : 'incorrect')}</div>`;
             await App.wait(600);
             if (this.testEnded) return;
             this.currentTrial++;
@@ -346,11 +420,11 @@ const PatternComparisonTest = {
         const content = App.getTestContent();
         content.innerHTML = `
             <div class="instructions">
-                <h2>練習完了</h2>
-                <p>本番は <strong>80秒</strong> の制限時間内に、できるだけ多くの問題に正確に答えてください。</p>
-                <p style="color:#888;">※ 本番では正誤のフィードバックは表示されません。</p>
-                <p>準備ができたら「本番開始」を押してください。</p>
-                <button class="btn btn-primary" id="btn-pc-test">本番開始</button>
+                <h2>${this.t('practiceComplete')}</h2>
+                <p>${this.t('testReminder')}</p>
+                <p style="color:#888;">${this.t('noFeedback')}</p>
+                <p>${this.t('readyPrompt')}</p>
+                <button class="btn btn-primary" id="btn-pc-test">${this.t('startTest')}</button>
             </div>
         `;
         App.bindPrimaryAdvance('btn-pc-test', () => this.startTest());
@@ -372,7 +446,7 @@ const PatternComparisonTest = {
 
         const result = {
             score: this.totalCorrect,
-            detail: `${this.totalCorrect}問正解 / ${this.trials.length}問回答`,
+            detail: this.t('resultDetail', { correct: this.totalCorrect, attempted: this.trials.length }),
             totalCorrect: this.totalCorrect,
             totalAttempted: this.trials.length,
             practiceAttempts: 1,
@@ -384,4 +458,13 @@ const PatternComparisonTest = {
     },
 };
 
+if (!App.testRegistry['pattern-comparison']) {
+    App.testRegistry['pattern-comparison'] = {
+        name: 'パターン比較課題',
+        domain: '処理速度',
+        module: null,
+    };
+}
+App.testRegistry['pattern-comparison'].nameKey = 'pattern-comparison.name';
+App.testRegistry['pattern-comparison'].domainKey = 'pattern-comparison.domain';
 App.testRegistry['pattern-comparison'].module = PatternComparisonTest;

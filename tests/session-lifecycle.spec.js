@@ -67,8 +67,8 @@ test('full start flow populates participant fields correctly', async ({ page }) 
     expect(state.randomSeed).toBeGreaterThan(0);
     expect(state.sessionNumber).toBe(1);
     expect(state.counterbalanceGroup).toBeGreaterThanOrEqual(0);
-    expect(state.counterbalanceGroup).toBeLessThan(5);
-    expect(state.selectedTests).toHaveLength(5);
+    expect(state.counterbalanceGroup).toBeLessThan(14);
+    expect(state.selectedTests).toHaveLength(7);
     expect(state.activeScreen).toBe('screen-test');
 });
 
@@ -119,12 +119,12 @@ test('JSON payload includes integrity_sha256 that verifies round-trip', async ({
     });
     expect(result.recorded).toBe(result.recomputed);
     expect(result.recorded).toMatch(/^[0-9a-f]{64}$/);
-    expect(result.version).toBe('cb-2026-05-research-v5');
-    expect(result.protocol.protocol_version).toBe('protocol-2026-05-remote-adult-v1');
+    expect(result.version).toBe('cb-2026-07-research-v8');
+    expect(result.protocol.protocol_version).toBe('protocol-2026-07-study-config-v4');
     expect(result.protocol.scoring_version).toBeTruthy();
     expect(result.qualityFlags.review_recommendation).toBe('ok');
     expect(result.reviewRows).toHaveLength(1);
-    expect(result.reviewRows[0].app_version).toBe('cb-2026-05-research-v5');
+    expect(result.reviewRows[0].app_version).toBe('cb-2026-07-research-v8');
     expect(result.reviewRows[0].qc_multiverse_version).toBe('qc-multiverse-2026-05-v1');
     expect(result.qcMultiverse.version).toBe('qc-multiverse-2026-05-v1');
     expect(result.qcMultiverse.universes).toHaveLength(5);

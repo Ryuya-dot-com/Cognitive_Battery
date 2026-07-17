@@ -35,6 +35,32 @@ except ImportError:  # pragma: no cover - optional dependency
     _OPENPYXL_AVAILABLE = False
 
 
+LEGACY_STUDY_CONFIG_HASH = "__legacy_no_study_config__"
+
+
+def study_config_hash_from_payload(payload: dict | None) -> str:
+    """Return the operational study-config hash or an explicit legacy sentinel."""
+    payload = payload if isinstance(payload, dict) else {}
+    study_configuration = payload.get("study_configuration", {})
+    participant = payload.get("participant", {})
+    protocol = payload.get("protocol", {})
+    manifest = payload.get("export_manifest", {})
+
+    candidates = [
+        study_configuration.get("config_hash") if isinstance(study_configuration, dict) else None,
+        study_configuration.get("study_config_hash") if isinstance(study_configuration, dict) else None,
+        participant.get("study_config_hash") if isinstance(participant, dict) else None,
+        protocol.get("study_config_hash") if isinstance(protocol, dict) else None,
+        manifest.get("study_config_hash") if isinstance(manifest, dict) else None,
+    ]
+    for candidate in candidates:
+        if isinstance(candidate, float) and candidate != candidate:  # NaN from tabular imports
+            continue
+        if candidate is not None and str(candidate).strip():
+            return str(candidate).strip()
+    return LEGACY_STUDY_CONFIG_HASH
+
+
 def fit_ex_gaussian(rts: Iterable[float]) -> dict | None:
     """Fit ex-Gaussian (mu, sigma, tau) to response times via MLE.
 
@@ -180,6 +206,7 @@ def load_payload_from_xlsx(path: Path) -> dict:
     participant_row = first_row(sheet_to_records(workbook, "Participant"))
     protocol = metadata_rows_to_dict(sheet_to_records(workbook, "Protocol Metadata"))
     manifest = metadata_rows_to_dict(sheet_to_records(workbook, "Export Manifest"))
+    study_configuration = metadata_rows_to_dict(sheet_to_records(workbook, "Study Configuration"))
     session_quality = first_row(sheet_to_records(workbook, "Session Quality"))
     review_row = first_row(sheet_to_records(workbook, "Researcher Review"))
     research_metrics = first_row(sheet_to_records(workbook, "Research Metrics"))
@@ -192,6 +219,8 @@ def load_payload_from_xlsx(path: Path) -> dict:
         "dccs_raw": "dccs",
         "pattern_comparison_raw": "pattern-comparison",
         "list_sorting_raw": "list-sorting",
+        "visual_digit_span_raw": "visual_digit_span",
+        "ecorsi_raw": "ecorsi",
         "picture_sequence_raw": "picture-sequence",
     }
     trials = {
@@ -203,8 +232,19 @@ def load_payload_from_xlsx(path: Path) -> dict:
     participant = {
         "participantId": participant_row.get("participantId") or manifest.get("participant_id"),
         "session_number": participant_row.get("session_number") or manifest.get("session_number"),
+        "study_config_hash": (
+            participant_row.get("study_config_hash")
+            or protocol.get("study_config_hash")
+            or manifest.get("study_config_hash")
+            or study_configuration.get("study_config_hash")
+        ),
         "counterbalance_group": participant_row.get("counterbalance_group") or manifest.get("counterbalance_group"),
         "consent_version": participant_row.get("consent_version") or protocol.get("consent_version"),
+        "ui_language": participant_row.get("ui_language") or protocol.get("ui_language"),
+        "instruction_language": participant_row.get("instruction_language") or protocol.get("instruction_language"),
+        "stimulus_language": participant_row.get("stimulus_language") or protocol.get("stimulus_language"),
+        "consent_language": participant_row.get("consent_language") or protocol.get("consent_language"),
+        "translation_version": participant_row.get("translation_version") or protocol.get("translation_version"),
         "age": participant_row.get("age"),
         "random_seed": participant_row.get("random_seed") or manifest.get("random_seed"),
         "viewing_distance_cm": participant_row.get("viewing_distance_cm"),
@@ -226,6 +266,7 @@ def load_payload_from_xlsx(path: Path) -> dict:
     return {
         "version": protocol.get("app_version") or manifest.get("app_version"),
         "export_manifest": manifest,
+        "study_configuration": study_configuration,
         "participant": participant,
         "protocol": protocol,
         "outlier_thresholds": outlier_thresholds,
@@ -256,14 +297,20 @@ def load_payload(path: Path) -> tuple[dict, bool | None]:
 def process_qc_multiverse_file(path: Path) -> list[dict]:
     payload, _ = load_payload(path)
     participant = payload.get("participant", {})
+    protocol = payload.get("protocol", {})
+    study_config_hash = study_config_hash_from_payload(payload)
     rows = []
     for row in qc_multiverse_rows(payload):
         if not isinstance(row, dict):
             continue
         flat = {
             "file": path.name,
+            "study_config_hash": study_config_hash,
             "participant_id": participant.get("participantId"),
             "session_number": participant.get("session_number"),
+            "ui_language": participant.get("ui_language") or protocol.get("ui_language"),
+            "stimulus_language": participant.get("stimulus_language") or protocol.get("stimulus_language"),
+            "translation_version": participant.get("translation_version") or protocol.get("translation_version"),
         }
         for key, value in row.items():
             flat[key] = json.dumps(value, ensure_ascii=False) if isinstance(value, (dict, list)) else value
@@ -281,19 +328,20 @@ def ordered_fieldnames(rows: list[dict]) -> list[str]:
 
 
 def build_summary_by_qc_universe(summary_rows: list[dict], qc_rows: list[dict]) -> list[dict]:
-    qc_by_file: dict[str, list[dict]] = {}
+    join_keys = ("study_config_hash", "participant_id", "session_number")
+    qc_by_session: dict[tuple[str, str, str], list[dict]] = {}
     for row in qc_rows:
-        file_name = row.get("file")
-        if file_name:
-            qc_by_file.setdefault(str(file_name), []).append(row)
+        key = tuple(str(row.get(field, "") or "").strip() for field in join_keys)
+        qc_by_session.setdefault(key, []).append(row)
 
     combined_rows = []
-    join_keys = {"file", "participant_id", "session_number"}
+    protected_keys = {"file", *join_keys}
     for summary in summary_rows:
-        for qc in qc_by_file.get(str(summary.get("file")), []):
+        key = tuple(str(summary.get(field, "") or "").strip() for field in join_keys)
+        for qc in qc_by_session.get(key, []):
             combined = dict(summary)
             for key, value in qc.items():
-                if key in join_keys:
+                if key in protected_keys:
                     continue
                 combined[f"qc_{key}"] = value
             combined_rows.append(combined)
@@ -344,10 +392,16 @@ def process_file(path: Path, rt_low: float, rt_high: float) -> dict:
     return {
         "file": path.name,
         "integrity_ok": integrity_ok,
+        "study_config_hash": study_config_hash_from_payload(payload),
         "participant_id": participant.get("participantId"),
         "session_number": participant.get("session_number"),
         "counterbalance_group": participant.get("counterbalance_group"),
         "consent_version": participant.get("consent_version"),
+        "ui_language": participant.get("ui_language") or protocol.get("ui_language"),
+        "instruction_language": participant.get("instruction_language") or protocol.get("instruction_language"),
+        "stimulus_language": participant.get("stimulus_language") or protocol.get("stimulus_language"),
+        "consent_language": participant.get("consent_language") or protocol.get("consent_language"),
+        "translation_version": participant.get("translation_version") or protocol.get("translation_version"),
         "app_version": protocol.get("app_version", payload.get("version")),
         "protocol_version": protocol.get("protocol_version"),
         "task_version": protocol.get("task_version"),
@@ -395,6 +449,20 @@ def process_file(path: Path, rt_low: float, rt_high: float) -> dict:
         "pc_accuracy": pc.get("accuracy_all"),
         "pc_d_prime": metrics.get("pattern_comparison_d_prime"),
         "pc_ies_correct_ms": metrics.get("pattern_comparison_ies_correct_ms"),
+        "visual_digit_span_forward_span": metrics.get("visual_digit_span_forward_span"),
+        "visual_digit_span_backward_span": metrics.get("visual_digit_span_backward_span"),
+        "visual_digit_span_forward_correct_trials": metrics.get("visual_digit_span_forward_correct_trials"),
+        "visual_digit_span_backward_correct_trials": metrics.get("visual_digit_span_backward_correct_trials"),
+        "visual_digit_span_observed_item_visible_ms_mean": metrics.get("visual_digit_span_observed_item_visible_ms_mean"),
+        "visual_digit_span_observed_item_soa_ms_mean": metrics.get("visual_digit_span_observed_item_soa_ms_mean"),
+        "ecorsi_forward_span": metrics.get("ecorsi_forward_span"),
+        "ecorsi_backward_span": metrics.get("ecorsi_backward_span"),
+        "ecorsi_forward_span_x_correct_trials": metrics.get("ecorsi_forward_span_x_correct_trials"),
+        "ecorsi_backward_span_x_correct_trials": metrics.get("ecorsi_backward_span_x_correct_trials"),
+        "ecorsi_forward_mean_first_tap_latency_ms": metrics.get("ecorsi_forward_mean_first_tap_latency_ms"),
+        "ecorsi_backward_mean_first_tap_latency_ms": metrics.get("ecorsi_backward_mean_first_tap_latency_ms"),
+        "ecorsi_observed_item_visible_ms_mean": metrics.get("ecorsi_observed_item_visible_ms_mean"),
+        "ecorsi_observed_item_soa_ms_mean": metrics.get("ecorsi_observed_item_soa_ms_mean"),
         "flanker_ex_mu": flanker_ex.get("ex_mu"),
         "flanker_ex_sigma": flanker_ex.get("ex_sigma"),
         "flanker_ex_tau": flanker_ex.get("ex_tau"),

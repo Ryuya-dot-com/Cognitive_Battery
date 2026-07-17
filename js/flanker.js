@@ -1,5 +1,72 @@
 // ==================== Flanker Inhibitory Control and Attention Test ====================
 
+I18n.register('flanker', {
+    ja: {
+        name: 'フランカー課題',
+        domain: '抑制制御・注意',
+        statusInstructions: '課題説明',
+        statusPractice: '練習',
+        statusTest: '本番',
+        title: 'フランカー課題',
+        introArrows: '画面の中央に5つの矢印が表示されます。',
+        introFocus: '<strong>真ん中の矢印の向き</strong>に注目し、できるだけ速く正確に回答してください。',
+        introLeft: '真ん中の矢印が左 (←) を向いている場合:<br><span class="key-hint">F キー</span> を押してください。',
+        introRight: '真ん中の矢印が右 (→) を向いている場合:<br><span class="key-hint">J キー</span> を押してください。',
+        exampleIncongruent: '例: ←←→←← → 正解は <span class="key-hint">J</span>',
+        exampleCongruent: '例: →→→→→ → 正解は <span class="key-hint">J</span>',
+        practiceFirst: 'まず練習から始めます。',
+        start: '開始',
+        keyGuideLeft: 'F ← 左',
+        keyGuideRight: '右 → J',
+        correct: '正解',
+        incorrect: '不正解',
+        practiceComplete: '練習完了',
+        practiceResult: '練習の結果: {correct} / {total} 正解',
+        testPrompt: '本番を開始します。できるだけ速く正確に回答してください。',
+        noFeedback: '※ 本番では正誤のフィードバックは表示されません。',
+        startTest: '本番開始',
+        practiceAgain: 'もう一度練習しましょう',
+        practiceRetryResult: '結果: {correct} / {total} 正解（{pass}問以上で通過）',
+        focusReminder: '真ん中の矢印の向きに注目してください。',
+        retryPractice: '再練習',
+        practiceEnded: '練習終了',
+        proceedToTest: '本番に進みます。真ん中の矢印の向きに注目してください。',
+        resultDetail: '正答率: {accuracy}%',
+    },
+    en: {
+        name: 'Flanker Task',
+        domain: 'Inhibitory Control and Attention',
+        statusInstructions: 'Instructions',
+        statusPractice: 'Practice',
+        statusTest: 'Test',
+        title: 'Flanker Task',
+        introArrows: 'Five arrows will appear in the center of the screen.',
+        introFocus: 'Focus on the <strong>direction of the middle arrow</strong> and respond as quickly and accurately as you can.',
+        introLeft: 'If the middle arrow points left (←), press the <span class="key-hint">F key</span>.',
+        introRight: 'If the middle arrow points right (→), press the <span class="key-hint">J key</span>.',
+        exampleIncongruent: 'Example: ←←→←← → Correct answer: <span class="key-hint">J</span>',
+        exampleCongruent: 'Example: →→→→→ → Correct answer: <span class="key-hint">J</span>',
+        practiceFirst: 'You will begin with practice.',
+        start: 'Start',
+        keyGuideLeft: 'F ← Left',
+        keyGuideRight: 'Right → J',
+        correct: 'Correct',
+        incorrect: 'Incorrect',
+        practiceComplete: 'Practice Complete',
+        practiceResult: 'Practice result: {correct} / {total} correct',
+        testPrompt: 'The test will now begin. Respond as quickly and accurately as you can.',
+        noFeedback: 'Correctness feedback will not be shown during the test.',
+        startTest: 'Start Test',
+        practiceAgain: "Let's Practice Again",
+        practiceRetryResult: 'Result: {correct} / {total} correct (at least {pass} required to pass)',
+        focusReminder: 'Focus on the direction of the middle arrow.',
+        retryPractice: 'Practice Again',
+        practiceEnded: 'Practice Finished',
+        proceedToTest: 'You will now proceed to the test. Focus on the direction of the middle arrow.',
+        resultDetail: 'Accuracy: {accuracy}%',
+    },
+});
+
 const FlankerTest = {
     PRACTICE_TRIALS: 5,
     PRACTICE_PASS: 4,
@@ -18,6 +85,14 @@ const FlankerTest = {
     stimulusOnset: 0,
     keyHandler: null,
 
+    t(key, params) {
+        return App.t(`flanker.${key}`, params);
+    },
+
+    updateStatus(key) {
+        if (typeof App.updateTestStatus === 'function') App.updateTestStatus(this.t(key));
+    },
+
     run() {
         this.trials = [];
         this.currentTrial = 0;
@@ -26,20 +101,19 @@ const FlankerTest = {
     },
 
     showInstructions() {
+        this.updateStatus('statusInstructions');
         const content = App.getTestContent();
         content.innerHTML = `
             <div class="instructions">
-                <h2>フランカー課題</h2>
-                <p>画面の中央に5つの矢印が表示されます。</p>
-                <p><strong>真ん中の矢印の向き</strong>に注目し、できるだけ速く正確に回答してください。</p>
-                <p>真ん中の矢印が左 (←) を向いている場合:<br>
-                   <span class="key-hint">F キー</span> を押してください。</p>
-                <p>真ん中の矢印が右 (→) を向いている場合:<br>
-                   <span class="key-hint">J キー</span> を押してください。</p>
-                <p style="color:#888;">例: ←←→←← → 正解は <span class="key-hint">J</span></p>
-                <p style="color:#888;">例: →→→→→ → 正解は <span class="key-hint">J</span></p>
-                <p>まず練習から始めます。</p>
-                <button class="btn btn-primary" id="btn-flanker-start">開始</button>
+                <h2>${this.t('title')}</h2>
+                <p>${this.t('introArrows')}</p>
+                <p>${this.t('introFocus')}</p>
+                <p>${this.t('introLeft')}</p>
+                <p>${this.t('introRight')}</p>
+                <p style="color:#888;">${this.t('exampleIncongruent')}</p>
+                <p style="color:#888;">${this.t('exampleCongruent')}</p>
+                <p>${this.t('practiceFirst')}</p>
+                <button class="btn btn-primary" id="btn-flanker-start">${this.t('start')}</button>
             </div>
         `;
         document.getElementById('btn-flanker-start').addEventListener('click', () => this.startPractice());
@@ -73,6 +147,7 @@ const FlankerTest = {
     },
 
     startPractice() {
+        this.updateStatus('statusPractice');
         this.isPractice = true;
         this.practiceAttempt++;
         this.currentTrial = 0;
@@ -82,6 +157,7 @@ const FlankerTest = {
     },
 
     startTest() {
+        this.updateStatus('statusTest');
         this.isPractice = false;
         this.currentTrial = 0;
         this.trials = [];
@@ -120,7 +196,9 @@ const FlankerTest = {
 
         // Stimulus
         const stimText = this.getStimulusText(trial);
-        const keyGuide = this.isPractice ? '<div class="flanker-key-guide"><span>F ← 左</span><span>右 → J</span></div>' : '';
+        const keyGuide = this.isPractice
+            ? `<div class="flanker-key-guide"><span>${this.t('keyGuideLeft')}</span><span>${this.t('keyGuideRight')}</span></div>`
+            : '';
         content.innerHTML = `${progressHtml}<div class="flanker-stimulus" aria-live="polite">${stimText}</div>${keyGuide}`;
         this.stimulusOnset = await App.waitForStimulusOnset();
         this.stimulusOnsetSessionMs = App.sessionElapsedMs(this.stimulusOnset);
@@ -170,7 +248,7 @@ const FlankerTest = {
             if (correct) this.practiceCorrect++;
             // Show feedback for practice
             const content = App.getTestContent();
-            content.innerHTML = `<div class="feedback ${correct ? 'correct' : 'incorrect'}" role="status" aria-live="assertive">${correct ? '正解' : '不正解'}</div>`;
+            content.innerHTML = `<div class="feedback ${correct ? 'correct' : 'incorrect'}" role="status" aria-live="assertive">${this.t(correct ? 'correct' : 'incorrect')}</div>`;
             await App.wait(800);
         } else {
             this.trials.push({
@@ -196,31 +274,31 @@ const FlankerTest = {
         if (this.practiceCorrect >= this.PRACTICE_PASS) {
             content.innerHTML = `
                 <div class="instructions">
-                    <h2>練習完了</h2>
-                    <p>練習の結果: ${this.practiceCorrect} / ${this.PRACTICE_TRIALS} 正解</p>
-                    <p>本番を開始します。できるだけ速く正確に回答してください。</p>
-                    <p style="color:#888;">※ 本番では正誤のフィードバックは表示されません。</p>
-                    <button class="btn btn-primary" id="btn-flanker-test">本番開始</button>
+                    <h2>${this.t('practiceComplete')}</h2>
+                    <p>${this.t('practiceResult', { correct: this.practiceCorrect, total: this.PRACTICE_TRIALS })}</p>
+                    <p>${this.t('testPrompt')}</p>
+                    <p style="color:#888;">${this.t('noFeedback')}</p>
+                    <button class="btn btn-primary" id="btn-flanker-test">${this.t('startTest')}</button>
                 </div>
             `;
             App.bindPrimaryAdvance('btn-flanker-test', () => this.startTest());
         } else if (this.practiceAttempt < this.MAX_PRACTICE_SETS) {
             content.innerHTML = `
                 <div class="instructions">
-                    <h2>もう一度練習しましょう</h2>
-                    <p>結果: ${this.practiceCorrect} / ${this.PRACTICE_TRIALS} 正解（${this.PRACTICE_PASS}問以上で通過）</p>
-                    <p>真ん中の矢印の向きに注目してください。</p>
-                    <button class="btn btn-primary" id="btn-flanker-retry">再練習</button>
+                    <h2>${this.t('practiceAgain')}</h2>
+                    <p>${this.t('practiceRetryResult', { correct: this.practiceCorrect, total: this.PRACTICE_TRIALS, pass: this.PRACTICE_PASS })}</p>
+                    <p>${this.t('focusReminder')}</p>
+                    <button class="btn btn-primary" id="btn-flanker-retry">${this.t('retryPractice')}</button>
                 </div>
             `;
             document.getElementById('btn-flanker-retry').addEventListener('click', () => this.startPractice());
         } else {
             content.innerHTML = `
                 <div class="instructions">
-                    <h2>練習終了</h2>
-                    <p>本番に進みます。真ん中の矢印の向きに注目してください。</p>
-                    <p style="color:#888;">※ 本番では正誤のフィードバックは表示されません。</p>
-                    <button class="btn btn-primary" id="btn-flanker-test">本番開始</button>
+                    <h2>${this.t('practiceEnded')}</h2>
+                    <p>${this.t('proceedToTest')}</p>
+                    <p style="color:#888;">${this.t('noFeedback')}</p>
+                    <button class="btn btn-primary" id="btn-flanker-test">${this.t('startTest')}</button>
                 </div>
             `;
             App.bindPrimaryAdvance('btn-flanker-test', () => this.startTest());
@@ -249,7 +327,7 @@ const FlankerTest = {
 
         const result = {
             score: saa.total,
-            detail: `正答率: ${(accuracy * 100).toFixed(1)}%`,
+            detail: this.t('resultDetail', { accuracy: (accuracy * 100).toFixed(1) }),
             accuracy: parseFloat((accuracy * 100).toFixed(1)),
             accScore: saa.accScore,
             rtScore: saa.rtScore,
@@ -265,4 +343,13 @@ const FlankerTest = {
 };
 
 // Register with App
-App.testRegistry['flanker'].module = FlankerTest;
+if (!App.testRegistry.flanker) {
+    App.testRegistry.flanker = {
+        name: 'フランカー課題',
+        domain: '抑制制御・注意',
+        module: null,
+    };
+}
+App.testRegistry.flanker.nameKey = 'flanker.name';
+App.testRegistry.flanker.domainKey = 'flanker.domain';
+App.testRegistry.flanker.module = FlankerTest;
